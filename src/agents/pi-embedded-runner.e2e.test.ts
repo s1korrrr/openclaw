@@ -288,4 +288,48 @@ describe("runEmbeddedPiAgent", () => {
     expect(result.meta.error).toBeUndefined();
     expect(result.payloads?.length ?? 0).toBeGreaterThan(0);
   });
+
+  it("persists plan-search metadata and emits planner events when enabled", async () => {
+    const sessionFile = nextSessionFile();
+    const sessionKey = nextSessionKey();
+    const events: Array<{ stream?: string; data?: Record<string, unknown> }> = [];
+    const cfg = {
+      ...makeOpenAiConfig(["mock-1"]),
+      agents: {
+        defaults: {
+          planSearch: {
+            enabled: true,
+            candidates: 3,
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    const result = await runEmbeddedPiAgent({
+      sessionId: "session:test",
+      sessionKey,
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: "Implement plan-search MVP and keep default behavior backward compatible.",
+      provider: "openai",
+      model: "mock-1",
+      timeoutMs: 5_000,
+      agentDir,
+      runId: nextRunId("plan-search-meta"),
+      enqueue: immediateEnqueue,
+      onAgentEvent: async (evt) => {
+        events.push({ stream: evt.stream, data: evt.data });
+      },
+    });
+
+    expect(result.meta.planSearch?.enabled).toBe(true);
+    expect(result.meta.planSearch?.candidateCount).toBe(3);
+    expect(result.meta.planSearch?.selectedCandidateId).toBeTruthy();
+    expect(result.meta.planSearch?.considered).toHaveLength(3);
+
+    const plannerEvent = events.find((evt) => evt.stream === "planner");
+    expect(plannerEvent).toBeDefined();
+    expect(plannerEvent?.data?.phase).toBe("plan_search_selected");
+  });
 });

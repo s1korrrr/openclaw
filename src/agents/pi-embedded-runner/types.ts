@@ -30,11 +30,33 @@ export type EmbeddedPiAgentMeta = {
   };
 };
 
+export type EmbeddedPiPlanSearchCandidateMeta = {
+  id: string;
+  title: string;
+  strategy: string;
+  score: number;
+  rationale: string[];
+  stepCount: number;
+};
+
+export type EmbeddedPiPlanSearchMeta = {
+  enabled: boolean;
+  candidateCount: number;
+  configuredScoringMode: "heuristic" | "llm";
+  appliedScoringMode: "heuristic" | "llm";
+  selectedCandidateId: string;
+  selectedScore: number;
+  considered: EmbeddedPiPlanSearchCandidateMeta[];
+  scoringFailed?: boolean;
+  scoringError?: string;
+};
+
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
   aborted?: boolean;
   systemPromptReport?: SessionSystemPromptReport;
+  planSearch?: EmbeddedPiPlanSearchMeta;
   error?: {
     kind:
       | "context_overflow"
