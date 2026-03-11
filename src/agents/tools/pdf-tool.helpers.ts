@@ -3,10 +3,16 @@ import type { OpenClawConfig } from "../../config/config.js";
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
+  resolveAgentModelRoutingPolicy,
 } from "../../config/model-input.js";
+import type { AgentModelRoutingPolicy } from "../../config/types.agents-shared.js";
 import { extractAssistantText } from "../pi-embedded-utils.js";
 
-export type PdfModelConfig = { primary?: string; fallbacks?: string[] };
+export type PdfModelConfig = {
+  primary?: string;
+  fallbacks?: string[];
+  routingPolicy?: AgentModelRoutingPolicy;
+};
 
 /**
  * Providers known to support native PDF document input.
@@ -84,12 +90,16 @@ export function coercePdfAssistantText(params: {
 export function coercePdfModelConfig(cfg?: OpenClawConfig): PdfModelConfig {
   const primary = resolveAgentModelPrimaryValue(cfg?.agents?.defaults?.pdfModel);
   const fallbacks = resolveAgentModelFallbackValues(cfg?.agents?.defaults?.pdfModel);
+  const routingPolicy = resolveAgentModelRoutingPolicy(cfg?.agents?.defaults?.pdfModel);
   const modelConfig: PdfModelConfig = {};
   if (primary?.trim()) {
     modelConfig.primary = primary.trim();
   }
   if (fallbacks.length > 0) {
     modelConfig.fallbacks = fallbacks;
+  }
+  if (routingPolicy) {
+    modelConfig.routingPolicy = routingPolicy;
   }
   return modelConfig;
 }

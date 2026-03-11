@@ -123,6 +123,7 @@ describe("config schema regressions", () => {
           pdfModel: {
             primary: "anthropic/claude-opus-4-6",
             fallbacks: ["openai/gpt-5-mini"],
+            routingPolicy: "lowest-cost",
           },
           pdfMaxBytesMb: 12,
           pdfMaxPages: 25,
