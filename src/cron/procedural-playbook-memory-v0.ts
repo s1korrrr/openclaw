@@ -54,6 +54,9 @@ export type CronProceduralPlaybookGuidanceV0 = {
   failureKind: CronProceduralPlaybookFailureKind;
   rootCause: string;
   steps: string[];
+  selectionScore: number;
+  unresolvedFailureCount: number;
+  recencyWeight: number;
   failureCount: number;
   successCount: number;
   lastSeenAtMs: number;
@@ -66,6 +69,12 @@ export interface CronProceduralPlaybookMemoryStoreV0 {
 }
 
 const MAX_TRACKED_JOB_IDS = 12;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RECENCY_HALF_LIFE_DAYS = 7;
+const FAILURE_WEIGHT = 2;
+const UNRESOLVED_FAILURE_WEIGHT = 8;
+const RECOVERY_WEIGHT = 3;
+const MIN_SELECTION_SCORE = 0.1;
 
 const DELIVERY_TARGET_ERROR_RE =
   /(delivery target|delivery\.to|delivery channel|delivery target is missing|delivery channel is missing|invalid telegram delivery target)/i;
@@ -265,22 +274,35 @@ export class CronProceduralPlaybookMemoryLayerV0 {
       return true;
     });
 
+    const now = this.nowMs();
     entries.sort((a, b) => {
+      const scoreDelta =
+        computeProceduralPlaybookSelectionScore(b, now).selectionScore -
+        computeProceduralPlaybookSelectionScore(a, now).selectionScore;
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
       if (b.failureCount !== a.failureCount) {
         return b.failureCount - a.failureCount;
       }
       return b.lastSeenAtMs - a.lastSeenAtMs;
     });
 
-    return entries.slice(0, limit).map((entry) => ({
-      signature: entry.signature,
-      failureKind: entry.failureKind,
-      rootCause: entry.rootCause,
-      steps: [...entry.steps],
-      failureCount: entry.failureCount,
-      successCount: entry.successCount,
-      lastSeenAtMs: entry.lastSeenAtMs,
-    }));
+    return entries.slice(0, limit).map((entry) => {
+      const selection = computeProceduralPlaybookSelectionScore(entry, now);
+      return {
+        signature: entry.signature,
+        failureKind: entry.failureKind,
+        rootCause: entry.rootCause,
+        steps: [...entry.steps],
+        selectionScore: selection.selectionScore,
+        unresolvedFailureCount: selection.unresolvedFailureCount,
+        recencyWeight: selection.recencyWeight,
+        failureCount: entry.failureCount,
+        successCount: entry.successCount,
+        lastSeenAtMs: entry.lastSeenAtMs,
+      };
+    });
   }
 
   buildPromptSnippet(params?: {
@@ -301,7 +323,9 @@ export class CronProceduralPlaybookMemoryLayerV0 {
     const lines: string[] = ["Procedural playbook (safe defaults from prior failures):"];
     for (const item of guidance) {
       lines.push(
-        `- ${item.failureKind} (${item.failureCount} failures / ${item.successCount} recoveries)`,
+        `- ${item.failureKind} (score ${item.selectionScore.toFixed(2)}; ` +
+          `${item.failureCount} failures / ${item.successCount} recoveries / ` +
+          `${item.unresolvedFailureCount} unresolved)`,
       );
       for (const step of item.steps) {
         lines.push(`  - ${step}`);
@@ -477,6 +501,29 @@ function clampLimit(limit?: number): number {
     return 1;
   }
   return Math.min(floored, 20);
+}
+
+function computeProceduralPlaybookSelectionScore(
+  entry: CronProceduralPlaybookEntryV0,
+  nowMs: number,
+): {
+  selectionScore: number;
+  unresolvedFailureCount: number;
+  recencyWeight: number;
+} {
+  const unresolvedFailureCount = Math.max(0, entry.failureCount - entry.successCount);
+  const ageDays = Math.max(0, nowMs - entry.lastSeenAtMs) / DAY_MS;
+  const recencyWeight = 1 / (1 + ageDays / RECENCY_HALF_LIFE_DAYS);
+  const baseScore =
+    entry.failureCount * FAILURE_WEIGHT +
+    unresolvedFailureCount * UNRESOLVED_FAILURE_WEIGHT -
+    entry.successCount * RECOVERY_WEIGHT;
+
+  return {
+    selectionScore: Number((Math.max(MIN_SELECTION_SCORE, baseScore) * recencyWeight).toFixed(6)),
+    unresolvedFailureCount,
+    recencyWeight: Number(recencyWeight.toFixed(6)),
+  };
 }
 
 function cloneEntry(value: CronProceduralPlaybookEntryV0): CronProceduralPlaybookEntryV0 {
