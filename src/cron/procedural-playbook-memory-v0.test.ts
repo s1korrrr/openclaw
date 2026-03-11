@@ -75,6 +75,16 @@ describe("CronProceduralPlaybookMemoryLayerV0", () => {
     expect(layer.buildPromptSnippet()).toContain(
       "score 10.00; 1 failures / 0 recoveries / 1 unresolved",
     );
+    expect(layer.getHypotheses()).toEqual([
+      expect.objectContaining({
+        failureKind: "delivery-target",
+        category: "delivery_target_resolution",
+        title: "Test explicit deterministic delivery routing",
+        selectionScore: 10,
+        confidence: 0.67,
+      }),
+    ]);
+    expect(layer.buildPromptSnippet()).toContain("Hypothesis candidates from repeated failures:");
   });
 
   it("records recoveries against the prior failure signature", () => {
@@ -173,6 +183,16 @@ describe("CronProceduralPlaybookMemoryLayerV0", () => {
     });
     expect(guidance[1]?.selectionScore).toBeCloseTo(2.33333, 5);
     expect(guidance[1]?.recencyWeight).toBeCloseTo(0.33333, 5);
+
+    const hypotheses = layer.getHypotheses({ includeUnknown: true, limit: 2 });
+    expect(hypotheses.map((entry) => entry.failureKind)).toEqual([
+      "tool-validation",
+      "delivery-target",
+    ]);
+    expect(hypotheses[0]).toMatchObject({
+      category: "tool_input_prevalidation",
+    });
+    expect(hypotheses[0]?.confidence).toBeGreaterThan(hypotheses[1]?.confidence ?? 0);
   });
 });
 

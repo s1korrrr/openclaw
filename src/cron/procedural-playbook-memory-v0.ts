@@ -62,6 +62,36 @@ export type CronProceduralPlaybookGuidanceV0 = {
   lastSeenAtMs: number;
 };
 
+export type CronProceduralHypothesisCategoryV0 =
+  | "delivery_target_resolution"
+  | "tool_input_prevalidation"
+  | "runtime_contract_alignment"
+  | "bounded_timeout_split"
+  | "root_cause_capture";
+
+export type CronProceduralHypothesisV0 = {
+  hypothesisId: string;
+  signature: string;
+  category: CronProceduralHypothesisCategoryV0;
+  failureKind: CronProceduralPlaybookFailureKind;
+  rootCause: string;
+  title: string;
+  rationale: string;
+  proposedChange: string;
+  expectedSignal: string;
+  confidence: number;
+  selectionScore: number;
+  evidence: {
+    failureCount: number;
+    successCount: number;
+    unresolvedFailureCount: number;
+    recencyWeight: number;
+    lastSeenAtMs: number;
+    lastJobName?: string;
+    jobIds: string[];
+  };
+};
+
 export interface CronProceduralPlaybookMemoryStoreV0 {
   load(): CronProceduralPlaybookMemoryStateV0 | undefined;
   save(state: CronProceduralPlaybookMemoryStateV0): void;
@@ -75,6 +105,7 @@ const FAILURE_WEIGHT = 2;
 const UNRESOLVED_FAILURE_WEIGHT = 8;
 const RECOVERY_WEIGHT = 3;
 const MIN_SELECTION_SCORE = 0.1;
+const MIN_HYPOTHESIS_CONFIDENCE = 0.2;
 
 const DELIVERY_TARGET_ERROR_RE =
   /(delivery target|delivery\.to|delivery channel|delivery target is missing|delivery channel is missing|invalid telegram delivery target)/i;
@@ -126,6 +157,55 @@ const DEFAULT_PLAYBOOK: Record<
       "Reproduce with `openclaw cron run <jobId>` to separate transient vs deterministic errors.",
       "Ship the narrowest mitigation first; avoid broad retries until root cause is clear.",
     ],
+  },
+};
+
+const DEFAULT_HYPOTHESIS_TEMPLATES: Record<
+  CronProceduralPlaybookFailureKind,
+  {
+    category: CronProceduralHypothesisCategoryV0;
+    title: string;
+    proposedChange: string;
+    expectedSignal: string;
+  }
+> = {
+  "delivery-target": {
+    category: "delivery_target_resolution",
+    title: "Test explicit deterministic delivery routing",
+    proposedChange:
+      "Set explicit `delivery.channel` and `delivery.to`, then dry-run one isolated execution to confirm the resolved target.",
+    expectedSignal: "The next run resolves a target without repeating the delivery-target failure.",
+  },
+  "tool-validation": {
+    category: "tool_input_prevalidation",
+    title: "Test stricter payload validation before job save",
+    proposedChange:
+      "Validate schedule/payload fields before saving the job and re-run one manual execution after the edit.",
+    expectedSignal:
+      "The next run clears tool-validation failures without widening runtime permissions.",
+  },
+  "runtime-validation": {
+    category: "runtime_contract_alignment",
+    title: "Test session-target and payload contract alignment",
+    proposedChange:
+      "Adjust the job so `sessionTarget`, `payload.kind`, and model/auth overrides match one supported runtime path, then rerun once.",
+    expectedSignal: "The next run clears runtime-validation failures and reaches normal execution.",
+  },
+  timeout: {
+    category: "bounded_timeout_split",
+    title: "Test splitting the workload or bounding timeout policy",
+    proposedChange:
+      "Reduce prompt scope or split the work into smaller cron jobs before increasing timeout, then compare one isolated rerun.",
+    expectedSignal:
+      "The next run finishes within the configured timeout or fails with a narrower, more actionable error.",
+  },
+  unknown: {
+    category: "root_cause_capture",
+    title: "Capture a narrower root-cause trace before retrying",
+    proposedChange:
+      "Run one isolated reproduction with exact error capture and compare the failure shape before attempting broader retries.",
+    expectedSignal:
+      "The next run yields a classified failure shape or a narrower reproducible error signature.",
   },
 };
 
@@ -317,7 +397,8 @@ export class CronProceduralPlaybookMemoryLayerV0 {
     });
 
     if (guidance.length === 0) {
-      return undefined;
+      const hypothesesOnly = this.buildHypothesisPromptSnippet(params);
+      return hypothesesOnly;
     }
 
     const lines: string[] = ["Procedural playbook (safe defaults from prior failures):"];
@@ -330,6 +411,84 @@ export class CronProceduralPlaybookMemoryLayerV0 {
       for (const step of item.steps) {
         lines.push(`  - ${step}`);
       }
+    }
+    const hypothesisSnippet = this.buildHypothesisPromptSnippet(params);
+    if (hypothesisSnippet) {
+      lines.push("");
+      lines.push(hypothesisSnippet);
+    }
+    return lines.join("\n");
+  }
+
+  getHypotheses(params?: {
+    sessionTarget?: CronSessionTarget;
+    payloadKind?: CronPayload["kind"];
+    limit?: number;
+    includeUnknown?: boolean;
+  }): CronProceduralHypothesisV0[] {
+    const guidance = this.getGuidance({
+      sessionTarget: params?.sessionTarget,
+      payloadKind: params?.payloadKind,
+      limit: params?.limit,
+      includeUnknown: params?.includeUnknown,
+    });
+
+    return guidance
+      .map((item): CronProceduralHypothesisV0 | undefined => {
+        const entry = this.state.entries[item.signature];
+        if (!entry) {
+          return undefined;
+        }
+        const template = DEFAULT_HYPOTHESIS_TEMPLATES[item.failureKind];
+        const evidence: CronProceduralHypothesisV0["evidence"] = {
+          failureCount: item.failureCount,
+          successCount: item.successCount,
+          unresolvedFailureCount: item.unresolvedFailureCount,
+          recencyWeight: item.recencyWeight,
+          lastSeenAtMs: item.lastSeenAtMs,
+          jobIds: [...entry.jobIds],
+          ...(entry.lastJobName ? { lastJobName: entry.lastJobName } : {}),
+        };
+        return {
+          hypothesisId: `${item.signature}:cluster_hypothesis_v1`,
+          signature: item.signature,
+          category: template.category,
+          failureKind: item.failureKind,
+          rootCause: item.rootCause,
+          title: template.title,
+          rationale:
+            `${item.failureKind} remains active with ${item.unresolvedFailureCount} unresolved ` +
+            `failures and recency weight ${item.recencyWeight.toFixed(2)}.`,
+          proposedChange: template.proposedChange,
+          expectedSignal: template.expectedSignal,
+          confidence: computeHypothesisConfidence(item),
+          selectionScore: item.selectionScore,
+          evidence,
+        } satisfies CronProceduralHypothesisV0;
+      })
+      .filter((item): item is CronProceduralHypothesisV0 => item !== undefined);
+  }
+
+  buildHypothesisPromptSnippet(params?: {
+    sessionTarget?: CronSessionTarget;
+    payloadKind?: CronPayload["kind"];
+    limit?: number;
+    includeUnknown?: boolean;
+  }): string | undefined {
+    const hypotheses = this.getHypotheses(params);
+    if (hypotheses.length === 0) {
+      return undefined;
+    }
+
+    const lines: string[] = ["Hypothesis candidates from repeated failures:"];
+    for (const item of hypotheses) {
+      lines.push(
+        `- ${item.title} (confidence ${item.confidence.toFixed(2)}; ` +
+          `${item.evidence.unresolvedFailureCount} unresolved / score ${item.selectionScore.toFixed(2)})`,
+      );
+      lines.push(`  - Why: ${item.rationale}`);
+      lines.push(`  - Experiment: ${item.proposedChange}`);
+      lines.push(`  - Expected signal: ${item.expectedSignal}`);
     }
     return lines.join("\n");
   }
@@ -524,6 +683,17 @@ function computeProceduralPlaybookSelectionScore(
     unresolvedFailureCount,
     recencyWeight: Number(recencyWeight.toFixed(6)),
   };
+}
+
+function computeHypothesisConfidence(guidance: CronProceduralPlaybookGuidanceV0): number {
+  const unresolvedBoost = Math.min(0.4, guidance.unresolvedFailureCount * 0.12);
+  const recoveryPenalty = Math.min(0.18, guidance.successCount * 0.04);
+  return Number(
+    Math.max(
+      MIN_HYPOTHESIS_CONFIDENCE,
+      Math.min(0.95, 0.35 + unresolvedBoost + guidance.recencyWeight * 0.2 - recoveryPenalty),
+    ).toFixed(3),
+  );
 }
 
 function cloneEntry(value: CronProceduralPlaybookEntryV0): CronProceduralPlaybookEntryV0 {
