@@ -96,4 +96,47 @@ describe("runCronIsolatedAgentTurn — interim ack retry", () => {
     mockFallbackPassthrough();
     await runTurnAndExpectOk(1, 1);
   });
+
+  it("records task-graph telemetry for descendants spawned during the run", async () => {
+    usePayloadTextExtraction();
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "Parallel research lanes completed." }],
+      meta: { agentMeta: { usage: { input: 10, output: 20 } } },
+    });
+    listDescendantRunsForRequesterMock.mockReturnValue([
+      {
+        runId: "run-beta",
+        childSessionKey: "agent:main:subagent:beta",
+        model: "gpt-5-mini",
+        spawnMode: "session",
+        createdAt: Date.now() + 60_000,
+        startedAt: Date.now() + 60_000,
+        endedAt: Date.now() + 90_000,
+        endedReason: "complete",
+        outcome: { status: "ok" },
+      },
+      {
+        runId: "run-alpha",
+        childSessionKey: "agent:main:subagent:alpha",
+        model: "gpt-5-mini",
+        spawnMode: "run",
+        createdAt: Date.now() + 30_000,
+        startedAt: Date.now() + 30_000,
+        outcome: { status: "unknown" },
+      },
+    ]);
+
+    mockFallbackPassthrough();
+    const result = await runTurnAndExpectOk(1, 1);
+
+    expect(result.taskGraph).toMatchObject({
+      version: 1,
+      orchestration: "subagent_fanout_join_v1",
+      joinStrategy: "wait_for_descendants",
+      laneCount: 2,
+      activeLaneCount: 1,
+    });
+    expect(result.taskGraph?.lanes.map((lane) => lane.runId)).toEqual(["run-alpha", "run-beta"]);
+    expect(result.taskGraph?.lanes.map((lane) => lane.status)).toEqual(["running", "completed"]);
+  });
 });

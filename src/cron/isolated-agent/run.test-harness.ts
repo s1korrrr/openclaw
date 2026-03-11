@@ -25,6 +25,7 @@ function createMock(): Mock {
 
 export const buildWorkspaceSkillSnapshotMock = createMock();
 export const resolveAgentConfigMock = createMock();
+export const resolveAgentModelRoutingPolicyMock = createMock();
 export const resolveAgentModelFallbacksOverrideMock = createMock();
 export const resolveAgentSkillsFilterMock = createMock();
 export const getModelRefStatusMock = createMock();
@@ -49,6 +50,7 @@ export const resolveDeliveryTargetMock = createMock();
 vi.mock("../../agents/agent-scope.js", () => ({
   resolveAgentConfig: resolveAgentConfigMock,
   resolveAgentDir: vi.fn().mockReturnValue("/tmp/agent-dir"),
+  resolveAgentModelRoutingPolicy: resolveAgentModelRoutingPolicyMock,
   resolveAgentModelFallbacksOverride: resolveAgentModelFallbacksOverrideMock,
   resolveAgentWorkspaceDir: vi.fn().mockReturnValue("/tmp/workspace"),
   resolveDefaultAgentId: vi.fn().mockReturnValue("default"),
@@ -254,6 +256,7 @@ export function resetRunCronIsolatedAgentTurnHarness(): void {
     version: 42,
   });
   resolveAgentConfigMock.mockReturnValue(undefined);
+  resolveAgentModelRoutingPolicyMock.mockReturnValue(undefined);
   resolveAgentModelFallbacksOverrideMock.mockReturnValue(undefined);
   resolveAgentSkillsFilterMock.mockReturnValue(undefined);
 
