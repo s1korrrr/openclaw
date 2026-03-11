@@ -300,6 +300,11 @@ describe("runEmbeddedPiAgent", () => {
           planSearch: {
             enabled: true,
             candidates: 3,
+            budget: {
+              maxTokens: 2_048,
+              maxRuntimeMs: 120_000,
+              maxCostUsd: 0.05,
+            },
           },
         },
       },
@@ -325,11 +330,14 @@ describe("runEmbeddedPiAgent", () => {
 
     expect(result.meta.planSearch?.enabled).toBe(true);
     expect(result.meta.planSearch?.candidateCount).toBe(3);
+    expect(result.meta.planSearch?.objective).toBe("performance_gain / compute_cost");
     expect(result.meta.planSearch?.selectedCandidateId).toBeTruthy();
     expect(result.meta.planSearch?.considered).toHaveLength(3);
+    expect(result.meta.planSearch?.budget.withinBudgetCount).toBeGreaterThan(0);
 
     const plannerEvent = events.find((evt) => evt.stream === "planner");
     expect(plannerEvent).toBeDefined();
     expect(plannerEvent?.data?.phase).toBe("plan_search_selected");
+    expect(plannerEvent?.data?.objective).toBe("performance_gain / compute_cost");
   });
 });
