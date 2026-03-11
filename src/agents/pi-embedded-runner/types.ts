@@ -127,6 +127,32 @@ export type EmbeddedPiSelfCalibrationMeta = {
   };
 };
 
+export type EmbeddedPiTemporalCreditFactor = {
+  id: string;
+  label: string;
+  stage: "plan" | "tool" | "observation" | "replan";
+  direction: "positive" | "negative";
+  contribution: number;
+  counterfactualOutcomeScore: number;
+  evidence?: {
+    toolName?: string;
+    stepIds?: string[];
+    count?: number;
+    reason?: string;
+  };
+};
+
+export type EmbeddedPiTemporalCreditMeta = {
+  version: 1;
+  heuristic: "evaluation_trace_ablation_v1";
+  observedOutcome: "completed" | "partial" | "failed";
+  observedOutcomeScore: number;
+  baselineOutcomeScore: number;
+  topPositiveFactorId?: string;
+  topNegativeFactorId?: string;
+  factors: EmbeddedPiTemporalCreditFactor[];
+};
+
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
@@ -135,6 +161,7 @@ export type EmbeddedPiRunMeta = {
   planSearch?: EmbeddedPiPlanSearchMeta;
   brains?: EmbeddedPiBrainsMeta;
   selfCalibration?: EmbeddedPiSelfCalibrationMeta;
+  temporalCredit?: EmbeddedPiTemporalCreditMeta;
   error?: {
     kind: EmbeddedPiRunErrorKind;
     message: string;

@@ -13,6 +13,11 @@ export type BuildEmbeddedPiSelfCalibrationParams = {
   didSendViaMessagingTool: boolean;
 };
 
+export type BuildEmbeddedPiRealizedOutcomeParams = Omit<
+  BuildEmbeddedPiSelfCalibrationParams,
+  "planSearch"
+>;
+
 export function buildEmbeddedPiSelfCalibrationMeta(
   params: BuildEmbeddedPiSelfCalibrationParams,
 ): EmbeddedPiSelfCalibrationMeta | undefined {
@@ -22,7 +27,7 @@ export function buildEmbeddedPiSelfCalibrationMeta(
   }
 
   const predictedConfidence = derivePredictedConfidence(planSearch);
-  const realized = deriveRealizedOutcome(params);
+  const realized = deriveEmbeddedPiRealizedOutcome(params);
   const realizedMinusPredicted = roundMetric(realized.outcomeScore - predictedConfidence);
   const verdict =
     Math.abs(realizedMinusPredicted) <= MATCH_TOLERANCE
@@ -82,8 +87,8 @@ function derivePredictedConfidence(planSearch: EmbeddedPiPlanSearchMeta): number
   return roundMetric(clamp01(predicted));
 }
 
-function deriveRealizedOutcome(
-  params: BuildEmbeddedPiSelfCalibrationParams,
+export function deriveEmbeddedPiRealizedOutcome(
+  params: BuildEmbeddedPiRealizedOutcomeParams,
 ): Pick<EmbeddedPiSelfCalibrationMeta["realized"], "outcome" | "outcomeScore"> {
   const hasVisibleOutput = params.payloadCount > 0 || params.didSendViaMessagingTool;
 
