@@ -89,6 +89,44 @@ export type EmbeddedPiBrainsMeta = {
   };
 };
 
+export type EmbeddedPiRunErrorKind =
+  | "context_overflow"
+  | "compaction_failure"
+  | "role_ordering"
+  | "image_size"
+  | "retry_limit";
+
+export type EmbeddedPiSelfCalibrationMeta = {
+  version: 1;
+  heuristic: "plan_search_vs_terminal_run_v1";
+  predicted: {
+    source: "plan_search";
+    selectedCandidateId: string;
+    candidateCount: number;
+    selectedScore: number;
+    normalizedConfidence: number;
+    performanceGain: number;
+    computeCost: number;
+    withinBudget: boolean;
+  };
+  realized: {
+    source: "terminal_run";
+    outcome: "completed" | "partial" | "failed";
+    outcomeScore: number;
+    durationMs: number;
+    payloadCount: number;
+    didSendViaMessagingTool: boolean;
+    aborted: boolean;
+    stopReason?: string;
+    errorKind?: EmbeddedPiRunErrorKind;
+  };
+  delta: {
+    realizedMinusPredicted: number;
+    confidenceDelta: number;
+    verdict: "matched" | "underperformed" | "outperformed";
+  };
+};
+
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
@@ -96,13 +134,9 @@ export type EmbeddedPiRunMeta = {
   systemPromptReport?: SessionSystemPromptReport;
   planSearch?: EmbeddedPiPlanSearchMeta;
   brains?: EmbeddedPiBrainsMeta;
+  selfCalibration?: EmbeddedPiSelfCalibrationMeta;
   error?: {
-    kind:
-      | "context_overflow"
-      | "compaction_failure"
-      | "role_ordering"
-      | "image_size"
-      | "retry_limit";
+    kind: EmbeddedPiRunErrorKind;
     message: string;
   };
   /** Stop reason for the agent run (e.g., "completed", "tool_calls"). */

@@ -156,6 +156,21 @@ const waitForTimeline = async (filePath: string, runId: string) => {
   return [];
 };
 
+const waitForTimelineObservation = async (
+  filePath: string,
+  runId: string,
+  observationKind: string,
+) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const timeline = await readAgentLoopTimeline({ filePath, runId });
+    if (timeline.some((entry) => entry.observationKind === observationKind)) {
+      return timeline;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return [];
+};
+
 const runWithOrphanedSingleUserMessage = async (text: string, sessionKey: string) => {
   const sessionFile = nextSessionFile();
   const sessionManager = SessionManager.open(sessionFile);
@@ -347,11 +362,69 @@ describe("runEmbeddedPiAgent", () => {
     expect(result.meta.planSearch?.selectedCandidateId).toBeTruthy();
     expect(result.meta.planSearch?.considered).toHaveLength(3);
     expect(result.meta.planSearch?.budget.withinBudgetCount).toBeGreaterThan(0);
+    expect(result.meta.selfCalibration?.heuristic).toBe("plan_search_vs_terminal_run_v1");
+    expect(result.meta.selfCalibration?.predicted.source).toBe("plan_search");
+    expect(result.meta.selfCalibration?.realized.outcome).toBe("completed");
 
     const plannerEvent = events.find((evt) => evt.stream === "planner");
     expect(plannerEvent).toBeDefined();
     expect(plannerEvent?.data?.phase).toBe("plan_search_selected");
     expect(plannerEvent?.data?.objective).toBe("performance_gain / compute_cost");
+  });
+
+  it("emits a self-calibration observation when plan search and tracing are enabled", async () => {
+    const sessionFile = nextSessionFile();
+    const sessionKey = nextSessionKey();
+    const traceFilePath = path.join(tempRoot ?? os.tmpdir(), "agent-loop-trace-calibration.jsonl");
+    const cfg = {
+      ...makeOpenAiConfig(["mock-1"]),
+      agents: {
+        defaults: {
+          planSearch: {
+            enabled: true,
+            candidates: 3,
+            budget: {
+              maxTokens: 2_048,
+              maxRuntimeMs: 120_000,
+              maxCostUsd: 0.05,
+            },
+          },
+        },
+      },
+      diagnostics: {
+        agentLoopTrace: {
+          enabled: true,
+          filePath: traceFilePath,
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    const runId = nextRunId("self-calibration");
+    const result = await runEmbeddedPiAgent({
+      sessionId: "session:test",
+      sessionKey,
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: "Use plan search to keep this change backward compatible and well tested.",
+      provider: "openai",
+      model: "mock-1",
+      timeoutMs: 5_000,
+      agentDir,
+      runId,
+      enqueue: immediateEnqueue,
+    });
+
+    expect(result.meta.selfCalibration?.delta.verdict).toBeTruthy();
+
+    const timeline = await waitForTimelineObservation(traceFilePath, runId, "evaluation_result");
+    const evaluationEntry = timeline.find((entry) => entry.observationKind === "evaluation_result");
+    expect(evaluationEntry?.status).toBe("completed");
+    expect(evaluationEntry?.details).toMatchObject({
+      heuristic: "plan_search_vs_terminal_run_v1",
+      selectedCandidateId: result.meta.planSearch?.selectedCandidateId,
+      verdict: result.meta.selfCalibration?.delta.verdict,
+    });
   });
 
   it("writes a queryable agent-loop timeline when diagnostics tracing is enabled", async () => {
