@@ -56,6 +56,7 @@ describe("plan-search", () => {
       overBudgetCount: 1,
     });
     expect(result.meta.considered[0]?.id).toBe("plan-2");
+    expect(result.meta.considered[0]?.steps).toHaveLength(5);
     expect(result.meta.considered.at(-1)?.id).toBe("plan-3");
     expect(result.meta.considered.at(-1)?.budgetViolations).toEqual([
       "tokens",

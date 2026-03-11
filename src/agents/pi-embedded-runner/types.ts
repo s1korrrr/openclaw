@@ -34,6 +34,7 @@ export type EmbeddedPiPlanSearchCandidateMeta = {
   id: string;
   title: string;
   strategy: string;
+  steps: string[];
   score: number;
   performanceGain: number;
   computeCost: number;
@@ -153,12 +154,48 @@ export type EmbeddedPiTemporalCreditMeta = {
   factors: EmbeddedPiTemporalCreditFactor[];
 };
 
+export type EmbeddedPiGenomeMutationPrimitive = {
+  kind: "tighten_budget" | "drop_step" | "promote_validation" | "swap_strategy_focus";
+  reason: string;
+  target?: string;
+};
+
+export type EmbeddedPiGenomeFragment = {
+  fragmentId: string;
+  title: string;
+  strategy: string;
+  summary: string;
+  steps: string[];
+  selected: boolean;
+  score: number;
+  performanceGain: number;
+  computeCost: number;
+  withinBudget: boolean;
+  rationale: string[];
+  mutationPrimitives: EmbeddedPiGenomeMutationPrimitive[];
+  provenance: {
+    source: "plan_search_candidate";
+    sourceRunId: string;
+    objective: "performance_gain / compute_cost";
+    candidateId: string;
+    selectedCandidateId: string;
+  };
+};
+
+export type EmbeddedPiGenomeStoreMeta = {
+  version: 1;
+  heuristic: "plan_search_genome_store_v1";
+  selectedFragmentId: string;
+  fragments: EmbeddedPiGenomeFragment[];
+};
+
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
   aborted?: boolean;
   systemPromptReport?: SessionSystemPromptReport;
   planSearch?: EmbeddedPiPlanSearchMeta;
+  genomeStore?: EmbeddedPiGenomeStoreMeta;
   brains?: EmbeddedPiBrainsMeta;
   selfCalibration?: EmbeddedPiSelfCalibrationMeta;
   temporalCredit?: EmbeddedPiTemporalCreditMeta;

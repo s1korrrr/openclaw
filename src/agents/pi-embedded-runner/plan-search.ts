@@ -629,6 +629,7 @@ export function runPlanSearch(params: {
       id: candidate.id,
       title: candidate.title,
       strategy: candidate.strategy,
+      steps: [...candidate.steps],
       score: candidate.score,
       performanceGain: candidate.performanceGain,
       computeCost: candidate.computeCost,
