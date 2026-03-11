@@ -197,7 +197,12 @@ function parseExecApprovalRisk(value: unknown): ExecApprovalRiskMetadata | undef
     reasons?: unknown;
     checkpointThreshold?: unknown;
   };
-  if (record.tier !== "low" && record.tier !== "medium" && record.tier !== "high") {
+  if (
+    record.tier !== "low" &&
+    record.tier !== "medium" &&
+    record.tier !== "high" &&
+    record.tier !== "critical"
+  ) {
     return undefined;
   }
   if (!Array.isArray(record.reasons)) {
@@ -205,17 +210,31 @@ function parseExecApprovalRisk(value: unknown): ExecApprovalRiskMetadata | undef
   }
   const reasons = record.reasons.filter(
     (
-      reason,
-    ): reason is "node-host" | "full-security" | "mutable-file-operand" | "obfuscated-command" =>
+      reason
+    ):
+      reason is
+        | "gateway-host"
+        | "node-host"
+        | "full-access"
+        | "full-security"
+        | "elevated-mode"
+        | "allowlist-heredoc"
+        | "mutable-file-operand"
+        | "obfuscated-command" =>
+      reason === "gateway-host" ||
       reason === "node-host" ||
+      reason === "full-access" ||
       reason === "full-security" ||
+      reason === "elevated-mode" ||
+      reason === "allowlist-heredoc" ||
       reason === "mutable-file-operand" ||
       reason === "obfuscated-command",
   );
   const checkpointThreshold =
     record.checkpointThreshold === "low" ||
     record.checkpointThreshold === "medium" ||
-    record.checkpointThreshold === "high"
+    record.checkpointThreshold === "high" ||
+    record.checkpointThreshold === "critical"
       ? record.checkpointThreshold
       : undefined;
   return {
@@ -230,6 +249,7 @@ function readExecApprovalUnavailableDetails(result: unknown): {
   warningText?: string;
   channelLabel?: string;
   sentApproverDms?: boolean;
+  risk?: ExecApprovalRiskMetadata;
 } | null {
   if (!result || typeof result !== "object") {
     return null;
@@ -256,6 +276,7 @@ function readExecApprovalUnavailableDetails(result: unknown): {
     warningText: typeof details.warningText === "string" ? details.warningText : undefined,
     channelLabel: typeof details.channelLabel === "string" ? details.channelLabel : undefined,
     sentApproverDms: details.sentApproverDms === true,
+    risk: parseExecApprovalRisk(details.risk),
   };
 }
 
@@ -304,6 +325,7 @@ async function emitToolResultOutput(params: {
           warningText: approvalUnavailable.warningText,
           channelLabel: approvalUnavailable.channelLabel,
           sentApproverDms: approvalUnavailable.sentApproverDms,
+          risk: approvalUnavailable.risk,
         }),
       );
       ctx.state.deterministicApprovalPromptSent = true;

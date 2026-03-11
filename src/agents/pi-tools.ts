@@ -136,6 +136,17 @@ function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
   const globalExec = cfg?.tools?.exec;
   const agentExec =
     cfg && params.agentId ? resolveAgentConfig(cfg, params.agentId)?.tools?.exec : undefined;
+  const approvalRisk =
+    globalExec?.approvalRisk || agentExec?.approvalRisk
+      ? {
+          ...globalExec?.approvalRisk,
+          ...agentExec?.approvalRisk,
+          tiers: {
+            ...globalExec?.approvalRisk?.tiers,
+            ...agentExec?.approvalRisk?.tiers,
+          },
+        }
+      : undefined;
   return {
     host: agentExec?.host ?? globalExec?.host,
     security: agentExec?.security ?? globalExec?.security,
@@ -152,6 +163,7 @@ function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
     timeoutSec: agentExec?.timeoutSec ?? globalExec?.timeoutSec,
     approvalRunningNoticeMs:
       agentExec?.approvalRunningNoticeMs ?? globalExec?.approvalRunningNoticeMs,
+    approvalRisk,
     cleanupMs: agentExec?.cleanupMs ?? globalExec?.cleanupMs,
     notifyOnExit: agentExec?.notifyOnExit ?? globalExec?.notifyOnExit,
     notifyOnExitEmptySuccess:

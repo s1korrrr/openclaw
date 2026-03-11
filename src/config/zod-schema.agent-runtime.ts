@@ -434,6 +434,26 @@ const ToolExecSafeBinProfileSchema = z
   })
   .strict();
 
+const ToolExecApprovalRiskTierSchema = z.enum(["low", "medium", "high", "critical"]).optional();
+
+const ToolExecApprovalRiskSchema = z
+  .object({
+    forceApprovalAtOrAbove: ToolExecApprovalRiskTierSchema,
+    tiers: z
+      .object({
+        gateway: ToolExecApprovalRiskTierSchema,
+        node: ToolExecApprovalRiskTierSchema,
+        fullAccess: ToolExecApprovalRiskTierSchema,
+        elevated: ToolExecApprovalRiskTierSchema,
+        obfuscated: ToolExecApprovalRiskTierSchema,
+        heredoc: ToolExecApprovalRiskTierSchema,
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .optional();
+
 const ToolExecBaseShape = {
   host: z.enum(["sandbox", "gateway", "node"]).optional(),
   security: z.enum(["deny", "allowlist", "full"]).optional(),
@@ -445,6 +465,7 @@ const ToolExecBaseShape = {
   safeBinProfiles: z.record(z.string(), ToolExecSafeBinProfileSchema).optional(),
   backgroundMs: z.number().int().positive().optional(),
   timeoutSec: z.number().int().positive().optional(),
+  approvalRisk: ToolExecApprovalRiskSchema,
   cleanupMs: z.number().int().positive().optional(),
   notifyOnExit: z.boolean().optional(),
   notifyOnExitEmptySuccess: z.boolean().optional(),

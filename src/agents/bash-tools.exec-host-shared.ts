@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
+import type { ExecApprovalRiskReason } from "../infra/exec-approval-risk.js";
 import {
+  isExecApprovalRiskTierAtOrAbove,
+  maxExecApprovalRiskTier,
+  type ExecApprovalRiskConfig,
+  type ExecApprovalRiskTier,
   maxAsk,
   minSecurity,
   resolveExecApprovals,
@@ -26,6 +31,13 @@ export type ExecApprovalPendingState = {
 
 export type ExecApprovalRequestState = ExecApprovalPendingState & {
   noticeSeconds: number;
+};
+
+export type ExecApprovalRiskContext = {
+  tier: ExecApprovalRiskTier;
+  threshold: ExecApprovalRiskTier | null;
+  reasons: ExecApprovalRiskReason[];
+  forced: boolean;
 };
 
 export function createExecApprovalPendingState(params: {
@@ -141,6 +153,54 @@ export function resolveExecHostApprovalContext(params: {
     throw new Error(`exec denied: host=${params.host} security=deny`);
   }
   return { approvals, hostSecurity, hostAsk, askFallback };
+}
+
+export function resolveExecApprovalRiskContext(params: {
+  config?: ExecApprovalRiskConfig;
+  host: "gateway" | "node";
+  security: ExecSecurity;
+  elevatedRequested?: boolean;
+  obfuscationDetected?: boolean;
+  heredocDetected?: boolean;
+}): ExecApprovalRiskContext {
+  const cfg = params.config;
+  let tier: ExecApprovalRiskTier =
+    cfg?.tiers?.[params.host] ?? (params.host === "node" ? "high" : "low");
+  const reasons = new Set<ExecApprovalRiskReason>([
+    params.host === "node" ? "node-host" : "gateway-host",
+  ]);
+  const applyTier = (
+    enabled: boolean,
+    nextTier: ExecApprovalRiskTier,
+    reason: ExecApprovalRiskReason,
+  ) => {
+    if (!enabled) {
+      return;
+    }
+    tier = maxExecApprovalRiskTier(tier, nextTier);
+    reasons.add(reason);
+  };
+
+  applyTier(params.security === "full", cfg?.tiers?.fullAccess ?? "high", "full-security");
+  applyTier(Boolean(params.elevatedRequested), cfg?.tiers?.elevated ?? "high", "elevated-mode");
+  applyTier(
+    Boolean(params.obfuscationDetected),
+    cfg?.tiers?.obfuscated ?? "critical",
+    "obfuscated-command",
+  );
+  applyTier(
+    Boolean(params.heredocDetected),
+    cfg?.tiers?.heredoc ?? "medium",
+    "allowlist-heredoc",
+  );
+
+  const threshold = cfg?.forceApprovalAtOrAbove ?? null;
+  return {
+    tier,
+    threshold,
+    reasons: Array.from(reasons),
+    forced: threshold ? isExecApprovalRiskTierAtOrAbove(tier, threshold) : false,
+  };
 }
 
 export async function resolveApprovalDecisionOrUndefined(params: {

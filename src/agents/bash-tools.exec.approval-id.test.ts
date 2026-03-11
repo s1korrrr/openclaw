@@ -334,6 +334,60 @@ describe("exec approvals", () => {
     });
   });
 
+  it("forces approval when tool risk-tier policy crosses its threshold", async () => {
+    const calls: string[] = [];
+    let approvalRequestParams: unknown;
+    vi.mocked(callGatewayTool).mockImplementation(async (method, _opts, params) => {
+      calls.push(method);
+      if (method === "exec.approval.request") {
+        approvalRequestParams = params;
+        return { status: "accepted", id: (params as { id?: string })?.id };
+      }
+      if (method === "exec.approval.waitDecision") {
+        return { decision: "deny" };
+      }
+      return { ok: true };
+    });
+
+    const tool = createExecTool({
+      host: "gateway",
+      ask: "off",
+      security: "full",
+      approvalRunningNoticeMs: 0,
+      approvalRisk: {
+        forceApprovalAtOrAbove: "high",
+      },
+    });
+
+    const result = await tool.execute("call3e", { command: "echo ok" });
+    expect(result.details).toMatchObject({
+      status: "approval-pending",
+      risk: {
+        tier: "high",
+        reasons: ["full-security", "gateway-host"],
+        checkpointThreshold: "high",
+      },
+    });
+    expect(approvalRequestParams).toMatchObject({
+      ask: "off",
+      security: "full",
+      risk: {
+        tier: "high",
+        reasons: ["full-security", "gateway-host"],
+        checkpointThreshold: "high",
+      },
+    });
+    const pendingText = result.content.find((part) => part.type === "text")?.text ?? "";
+    expect(pendingText).toContain("Risk: high (checkpoint >= high; full security, gateway host)");
+    expect(calls).toContain("exec.approval.request");
+    await expect
+      .poll(() => calls.includes("exec.approval.waitDecision"), {
+        timeout: 2_000,
+        interval: 20,
+      })
+      .toBe(true);
+  });
+
   it("requires approval for elevated ask when allowlist misses", async () => {
     const calls: string[] = [];
     let resolveApproval: (() => void) | undefined;

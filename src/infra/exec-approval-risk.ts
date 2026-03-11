@@ -5,8 +5,12 @@ import type {
 import type { ExecHost, ExecSecurity, SystemRunApprovalPlan } from "./exec-approvals.js";
 
 export type ExecApprovalRiskReason =
+  | "gateway-host"
   | "node-host"
+  | "full-access"
   | "full-security"
+  | "elevated-mode"
+  | "allowlist-heredoc"
   | "mutable-file-operand"
   | "obfuscated-command";
 
@@ -20,11 +24,16 @@ const EXEC_APPROVAL_RISK_ORDER: Record<ExecApprovalRiskTier, number> = {
   low: 0,
   medium: 1,
   high: 2,
+  critical: 3,
 };
 
 const EXEC_APPROVAL_RISK_REASON_LABELS: Record<ExecApprovalRiskReason, string> = {
+  "gateway-host": "gateway host",
   "node-host": "node host",
+  "full-access": "full access",
   "full-security": "full security",
+  "elevated-mode": "elevated mode",
+  "allowlist-heredoc": "allowlist heredoc",
   "mutable-file-operand": "mutable file target",
   "obfuscated-command": "obfuscated command",
 };
@@ -47,6 +56,13 @@ export function compareExecApprovalRiskTier(
   right: ExecApprovalRiskTier,
 ): number {
   return EXEC_APPROVAL_RISK_ORDER[left] - EXEC_APPROVAL_RISK_ORDER[right];
+}
+
+export function minExecApprovalRiskTier(
+  left: ExecApprovalRiskTier,
+  right: ExecApprovalRiskTier,
+): ExecApprovalRiskTier {
+  return compareExecApprovalRiskTier(left, right) <= 0 ? left : right;
 }
 
 export function resolveExecApprovalCheckpointThreshold(

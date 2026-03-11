@@ -572,6 +572,53 @@ describe("exec approval handlers", () => {
     );
   });
 
+  it("stores and broadcasts risk-tier audit metadata on approval request", async () => {
+    const manager = new ExecApprovalManager();
+    const handlers = createExecApprovalHandlers(manager);
+    const broadcasts: Array<{ event: string; payload: unknown }> = [];
+    const respond = vi.fn();
+    const context = {
+      broadcast: (event: string, payload: unknown) => {
+        broadcasts.push({ event, payload });
+      },
+      hasExecApprovalClients: () => true,
+    };
+
+    await requestExecApproval({
+      handlers,
+      respond,
+      context,
+      params: {
+        host: "gateway",
+        nodeId: undefined,
+        systemRunPlan: undefined,
+        risk: {
+          tier: "critical",
+          reasons: ["gateway-host", "obfuscated-command"],
+          checkpointThreshold: "high",
+        },
+      },
+    });
+
+    const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
+    expect(requested).toBeTruthy();
+    const payload = requested?.payload as { id: string; request: Record<string, unknown> };
+    expect(payload.request).toMatchObject({
+      risk: {
+        tier: "critical",
+        reasons: ["gateway-host", "obfuscated-command"],
+        checkpointThreshold: "high",
+      },
+    });
+    expect(manager.getSnapshot(payload.id)?.request).toMatchObject({
+      risk: {
+        tier: "critical",
+        reasons: ["gateway-host", "obfuscated-command"],
+        checkpointThreshold: "high",
+      },
+    });
+  });
+
   it("prefers systemRunPlan canonical command/cwd when present", async () => {
     const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
     await requestExecApproval({

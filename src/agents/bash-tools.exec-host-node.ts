@@ -4,6 +4,7 @@ import { loadConfig } from "../config/config.js";
 import { buildExecApprovalUnavailableReplyPayload } from "../infra/exec-approval-reply.js";
 import {
   classifyExecApprovalRisk,
+  minExecApprovalRiskTier,
   resolveExecApprovalCheckpointThreshold,
   shouldRequireExecApprovalCheckpoint,
   withExecApprovalCheckpointMetadata,
@@ -13,10 +14,12 @@ import {
   resolveExecApprovalInitiatingSurfaceState,
 } from "../infra/exec-approval-surface.js";
 import {
+  type ExecApprovalRiskConfig,
   type ExecApprovalsFile,
   type ExecAsk,
   type ExecSecurity,
   evaluateShellAllowlist,
+  maxExecApprovalRiskTier,
   requiresExecApproval,
   resolveExecApprovalsFromFile,
 } from "../infra/exec-approvals.js";
@@ -32,6 +35,7 @@ import {
 } from "./bash-tools.exec-approval-request.js";
 import {
   createDefaultExecApprovalRequestContext,
+  resolveExecApprovalRiskContext,
   resolveBaseExecApprovalDecision,
   resolveApprovalDecisionOrUndefined,
   resolveExecHostApprovalContext,
@@ -61,6 +65,8 @@ export type ExecuteNodeHostCommandParams = {
   agentId?: string;
   security: ExecSecurity;
   ask: ExecAsk;
+  approvalRisk?: ExecApprovalRiskConfig;
+  elevatedRequested?: boolean;
   timeoutSec?: number;
   defaultTimeoutSec: number;
   approvalRunningNoticeMs: number;
@@ -199,13 +205,32 @@ export async function executeNodeHostCommand(
     systemRunPlan: prepared.plan,
     obfuscationDetected: obfuscation.detected,
   });
+  const configuredApprovalRisk = params.approvalRisk
+    ? resolveExecApprovalRiskContext({
+        config: params.approvalRisk,
+        host: "node",
+        security: hostSecurity,
+        elevatedRequested: params.elevatedRequested,
+        obfuscationDetected: obfuscation.detected,
+      })
+    : null;
+  const effectiveCheckpointThreshold =
+    configuredApprovalRisk?.threshold && checkpointThreshold
+      ? minExecApprovalRiskTier(configuredApprovalRisk.threshold, checkpointThreshold)
+      : configuredApprovalRisk?.threshold ?? checkpointThreshold;
+  const combinedRisk = configuredApprovalRisk
+    ? {
+        tier: maxExecApprovalRiskTier(baseRisk.tier, configuredApprovalRisk.tier),
+        reasons: Array.from(new Set([...baseRisk.reasons, ...configuredApprovalRisk.reasons])),
+      }
+    : baseRisk;
   const requiresCheckpointApproval = shouldRequireExecApprovalCheckpoint({
-    risk: baseRisk,
-    checkpointThreshold,
+    risk: combinedRisk,
+    checkpointThreshold: effectiveCheckpointThreshold,
   });
   const risk = withExecApprovalCheckpointMetadata({
-    risk: baseRisk,
-    checkpointThreshold,
+    risk: combinedRisk,
+    checkpointThreshold: effectiveCheckpointThreshold,
   });
   const requiresAsk =
     requiresExecApproval({
@@ -405,13 +430,14 @@ export async function executeNodeHostCommand(
           type: "text",
           text:
             unavailableReason !== null
-              ? (buildExecApprovalUnavailableReplyPayload({
-                  warningText,
-                  reason: unavailableReason,
-                  channelLabel: initiatingSurface.channelLabel,
-                  sentApproverDms,
-                }).text ?? "")
-              : buildApprovalPendingMessage({
+                ? (buildExecApprovalUnavailableReplyPayload({
+                    warningText,
+                    reason: unavailableReason,
+                    channelLabel: initiatingSurface.channelLabel,
+                    sentApproverDms,
+                    risk,
+                  }).text ?? "")
+                : buildApprovalPendingMessage({
                   warningText,
                   approvalSlug,
                   approvalId,
@@ -435,6 +461,7 @@ export async function executeNodeHostCommand(
               cwd: params.workdir,
               nodeId,
               warningText,
+              risk,
             } satisfies ExecToolDetails)
           : ({
               status: "approval-pending",

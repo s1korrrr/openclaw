@@ -1,5 +1,5 @@
 export type ExecApprovalForwardingMode = "session" | "targets" | "both";
-export type ExecApprovalRiskTier = "low" | "medium" | "high";
+export type ExecApprovalRiskTier = "low" | "medium" | "high" | "critical";
 
 export type ExecApprovalForwardTarget = {
   /** Channel id (e.g. "discord", "slack", or plugin channel id). */
