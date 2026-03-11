@@ -65,12 +65,15 @@ describe("CronProceduralPlaybookMemoryLayerV0", () => {
     expect(layer.getGuidance()).toEqual([
       expect.objectContaining({
         failureKind: "delivery-target",
+        selectionScore: 10,
+        unresolvedFailureCount: 1,
+        recencyWeight: 1,
         failureCount: 1,
         successCount: 0,
       }),
     ]);
     expect(layer.buildPromptSnippet()).toContain(
-      "Procedural playbook (safe defaults from prior failures):",
+      "score 10.00; 1 failures / 0 recoveries / 1 unresolved",
     );
   });
 
@@ -103,6 +106,73 @@ describe("CronProceduralPlaybookMemoryLayerV0", () => {
       successCount: 1,
       jobIds: ["job-1"],
     });
+  });
+
+  it("prefers recent unresolved failures over older recovered playbooks", () => {
+    const nowMs = 1_700_000_000_000;
+    const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
+    const store = createInMemoryCronProceduralPlaybookMemoryStoreV0();
+    const layer = new CronProceduralPlaybookMemoryLayerV0({
+      store,
+      nowMs: () => nowMs,
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      layer.recordSignal({
+        jobId: `delivery-fail-${index}`,
+        sessionTarget: "main",
+        payloadKind: "systemEvent",
+        status: "error",
+        error: "delivery target is missing",
+        occurredAtMs: nowMs - twoWeeksMs,
+      });
+    }
+    for (let index = 0; index < 3; index += 1) {
+      layer.recordSignal({
+        jobId: `delivery-ok-${index}`,
+        sessionTarget: "main",
+        payloadKind: "systemEvent",
+        status: "ok",
+        error: "delivery target is missing",
+        occurredAtMs: nowMs - twoWeeksMs + 1_000,
+      });
+    }
+
+    layer.recordSignal({
+      jobId: "tool-fail-1",
+      sessionTarget: "isolated",
+      payloadKind: "agentTurn",
+      status: "error",
+      error: "invalid cron.add params: payload.message required",
+      occurredAtMs: nowMs,
+    });
+    layer.recordSignal({
+      jobId: "tool-fail-2",
+      sessionTarget: "isolated",
+      payloadKind: "agentTurn",
+      status: "error",
+      error: "invalid cron.add params: payload.message required",
+      occurredAtMs: nowMs,
+    });
+
+    const guidance = layer.getGuidance({ includeUnknown: true, limit: 2 });
+
+    expect(guidance.map((entry) => entry.failureKind)).toEqual([
+      "tool-validation",
+      "delivery-target",
+    ]);
+    expect(guidance[0]).toMatchObject({
+      failureKind: "tool-validation",
+      unresolvedFailureCount: 2,
+      selectionScore: 20,
+      recencyWeight: 1,
+    });
+    expect(guidance[1]).toMatchObject({
+      failureKind: "delivery-target",
+      unresolvedFailureCount: 1,
+    });
+    expect(guidance[1]?.selectionScore).toBeCloseTo(2.33333, 5);
+    expect(guidance[1]?.recencyWeight).toBeCloseTo(0.33333, 5);
   });
 });
 
