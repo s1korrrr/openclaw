@@ -123,6 +123,13 @@ type ExecApprovalHandlerInternals = {
   >;
   requestCache: Map<string, ExecApprovalRequest>;
   handleApprovalRequested: (request: ExecApprovalRequest) => Promise<void>;
+  handleApprovalResolved: (resolved: {
+    id: string;
+    decision: "allow-once" | "allow-always" | "deny";
+    resolvedBy?: string | null;
+    ts: number;
+    request?: ExecApprovalRequest["request"];
+  }) => Promise<void>;
   handleApprovalTimeout: (approvalId: string, source?: "channel" | "dm") => Promise<void>;
 };
 
@@ -136,6 +143,10 @@ function clearPendingTimeouts(handler: DiscordExecApprovalHandler) {
     clearTimeout(pending.timeoutId);
   }
   internals.pending.clear();
+}
+
+function findPostedBody(route: string) {
+  return mockRestPost.mock.calls.find(([calledRoute]) => calledRoute === route)?.[1]?.body;
 }
 
 function createRequest(
@@ -796,6 +807,62 @@ describe("DiscordExecApprovalHandler delivery routing", () => {
           components: expect.any(Array),
         }),
       }),
+    );
+
+    clearPendingTimeouts(handler);
+  });
+
+  it("includes risk metadata in approval request cards", async () => {
+    const handler = createHandler({
+      enabled: true,
+      approvers: ["123"],
+      target: "channel",
+    });
+    const internals = getHandlerInternals(handler);
+
+    await internals.handleApprovalRequested(
+      createRequest({
+        risk: {
+          tier: "high",
+          reasons: ["node-host", "mutable-file-operand"],
+          checkpointThreshold: "medium",
+        },
+      }),
+    );
+
+    expect(JSON.stringify(findPostedBody(Routes.channelMessages("999888777")) ?? {})).toContain(
+      "- Risk: high (checkpoint >= medium; node host, mutable file target)",
+    );
+
+    clearPendingTimeouts(handler);
+  });
+
+  it("includes risk metadata in resolved approval cards", async () => {
+    const handler = createHandler({
+      enabled: true,
+      approvers: ["123"],
+      target: "channel",
+    });
+    const internals = getHandlerInternals(handler);
+    const request = createRequest({
+      risk: {
+        tier: "medium",
+        reasons: ["full-security"],
+        checkpointThreshold: "medium",
+      },
+    });
+
+    await internals.handleApprovalRequested(request);
+    await internals.handleApprovalResolved({
+      id: request.id,
+      decision: "allow-once",
+      resolvedBy: "discord:123",
+      ts: Date.now(),
+      request: request.request,
+    });
+
+    expect(JSON.stringify(mockRestPatch.mock.calls[0]?.[1]?.body ?? {})).toContain(
+      "- Risk: medium (checkpoint >= medium; full security)",
     );
 
     clearPendingTimeouts(handler);

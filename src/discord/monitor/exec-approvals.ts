@@ -18,6 +18,7 @@ import { createOperatorApprovalsGatewayClient } from "../../gateway/operator-app
 import type { EventFrame } from "../../gateway/protocol/index.js";
 import { resolveExecApprovalCommandDisplay } from "../../infra/exec-approval-command-display.js";
 import { getExecApprovalApproverDmNoticeText } from "../../infra/exec-approval-reply.js";
+import { formatExecApprovalRiskSummary } from "../../infra/exec-approval-risk.js";
 import type {
   ExecApprovalDecision,
   ExecApprovalRequest,
@@ -222,6 +223,10 @@ function buildExecApprovalMetadataLines(request: ExecApprovalRequest): string[] 
   if (request.request.host) {
     lines.push(`- Host: ${request.request.host}`);
   }
+  const riskSummary = formatExecApprovalRiskSummary(request.request.risk);
+  if (riskSummary) {
+    lines.push(`- Risk: ${riskSummary}`);
+  }
   if (Array.isArray(request.request.envKeys) && request.request.envKeys.length > 0) {
     lines.push(`- Env Overrides: ${request.request.envKeys.join(", ")}`);
   }
@@ -313,6 +318,7 @@ function createResolvedContainer(params: {
     description: params.resolvedBy ? `Resolved by ${params.resolvedBy}` : "Resolved",
     commandPreview,
     commandSecondaryPreview,
+    metadataLines: buildExecApprovalMetadataLines(params.request),
     footer: `ID: ${params.request.id}`,
     accentColor,
   });
@@ -336,6 +342,7 @@ function createExpiredContainer(params: {
     description: "This approval request has expired.",
     commandPreview,
     commandSecondaryPreview,
+    metadataLines: buildExecApprovalMetadataLines(params.request),
     footer: `ID: ${params.request.id}`,
     accentColor: "#99AAB5",
   });
