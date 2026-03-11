@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import type { ModelDefinitionConfig } from "../config/types.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
 import { saveAuthProfileStore } from "./auth-profiles.js";
@@ -17,12 +18,12 @@ const makeCfg = makeModelFallbackCfg;
 function makeModelDefinition(
   id: string,
   cost: { input: number; output: number; cacheRead?: number; cacheWrite?: number },
-) {
+): ModelDefinitionConfig {
   return {
     id,
     name: id,
     reasoning: false,
-    input: ["text"] as const,
+    input: ["text"],
     cost: {
       input: cost.input,
       output: cost.output,
@@ -839,6 +840,98 @@ describe("runWithModelFallback", () => {
     expect(calls).toEqual([
       { provider: "anthropic", model: "claude-opus-4-5" },
       { provider: "openai", model: "gpt-4.1" },
+    ]);
+  });
+
+  it("keeps explicit fallbacksOverride order unless the caller opts into routingPolicy=lowest-cost", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["openai/gpt-5-nano", "anthropic/claude-sonnet-4"],
+            routingPolicy: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://example.test/openai",
+            models: [makeModelDefinition("gpt-5-nano", { input: 0.2, output: 0.5 })],
+          },
+          anthropic: {
+            baseUrl: "https://example.test/anthropic",
+            models: [makeModelDefinition("claude-sonnet-4", { input: 3, output: 9 })],
+          },
+        },
+      },
+    });
+
+    const calls: Array<{ provider: string; model: string }> = [];
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      fallbacksOverride: ["anthropic/claude-sonnet-4", "openai/gpt-5-nano"],
+      run: async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "openai" && model === "gpt-4.1-mini") {
+          throw Object.assign(new Error("rate limited"), { status: 429 });
+        }
+        if (provider === "anthropic" && model === "claude-sonnet-4") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      },
+    });
+
+    expect(result.result).toBe("ok");
+    expect(calls).toEqual([
+      { provider: "openai", model: "gpt-4.1-mini" },
+      { provider: "anthropic", model: "claude-sonnet-4" },
+    ]);
+  });
+
+  it("can reorder explicit fallbacksOverride by declared cost when the caller opts into routingPolicy=lowest-cost", async () => {
+    const cfg = makeCfg({
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://example.test/openai",
+            models: [makeModelDefinition("gpt-5-nano", { input: 0.2, output: 0.5 })],
+          },
+          anthropic: {
+            baseUrl: "https://example.test/anthropic",
+            models: [makeModelDefinition("claude-sonnet-4", { input: 3, output: 9 })],
+          },
+        },
+      },
+    });
+
+    const calls: Array<{ provider: string; model: string }> = [];
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      routingPolicy: "lowest-cost",
+      fallbacksOverride: ["anthropic/claude-sonnet-4", "openai/gpt-5-nano"],
+      run: async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "openai" && model === "gpt-4.1-mini") {
+          throw Object.assign(new Error("rate limited"), { status: 429 });
+        }
+        if (provider === "openai" && model === "gpt-5-nano") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      },
+    });
+
+    expect(result.result).toBe("ok");
+    expect(calls).toEqual([
+      { provider: "openai", model: "gpt-4.1-mini" },
+      { provider: "openai", model: "gpt-5-nano" },
     ]);
   });
 

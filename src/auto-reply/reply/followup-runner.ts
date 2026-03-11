@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
-import { resolveRunModelFallbacksOverride } from "../../agents/agent-scope.js";
+import {
+  resolveRunModelRoutingPolicy,
+  resolveRunModelFallbacksOverride,
+} from "../../agents/agent-scope.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -161,6 +164,11 @@ export function createFollowupRunner(params: {
           model: queued.run.model,
           runId,
           agentDir: queued.run.agentDir,
+          routingPolicy: resolveRunModelRoutingPolicy({
+            cfg: queued.run.config,
+            agentId: queued.run.agentId,
+            sessionKey: queued.run.sessionKey,
+          }),
           fallbacksOverride: resolveRunModelFallbacksOverride({
             cfg: queued.run.config,
             agentId: queued.run.agentId,

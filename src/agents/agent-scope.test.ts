@@ -9,10 +9,12 @@ import {
   resolveAgentDir,
   resolveAgentEffectiveModelPrimary,
   resolveAgentExplicitModelPrimary,
+  resolveAgentModelRoutingPolicy,
   resolveFallbackAgentId,
   resolveEffectiveModelFallbacks,
   resolveAgentModelFallbacksOverride,
   resolveAgentModelPrimary,
+  resolveRunModelRoutingPolicy,
   resolveRunModelFallbacksOverride,
   resolveAgentWorkspaceDir,
   resolveAgentIdByWorkspacePath,
@@ -112,6 +114,7 @@ describe("resolveAgentConfig", () => {
           model: {
             primary: "anthropic/claude-sonnet-4",
             fallbacks: ["openai/gpt-4.1"],
+            routingPolicy: "lowest-cost",
           },
         },
         list: [
@@ -120,6 +123,7 @@ describe("resolveAgentConfig", () => {
             model: {
               primary: "anthropic/claude-opus-4",
               fallbacks: ["openai/gpt-5.2"],
+              routingPolicy: "configured",
             },
           },
         ],
@@ -130,10 +134,16 @@ describe("resolveAgentConfig", () => {
     expect(resolveAgentExplicitModelPrimary(cfg, "linus")).toBe("anthropic/claude-opus-4");
     expect(resolveAgentEffectiveModelPrimary(cfg, "linus")).toBe("anthropic/claude-opus-4");
     expect(resolveAgentModelFallbacksOverride(cfg, "linus")).toEqual(["openai/gpt-5.2"]);
+    expect(resolveAgentModelRoutingPolicy(cfg, "linus")).toBe("configured");
 
     // If fallbacks isn't present, we don't override the global fallbacks.
     const cfgNoOverride: OpenClawConfig = {
       agents: {
+        defaults: {
+          model: {
+            routingPolicy: "lowest-cost",
+          },
+        },
         list: [
           {
             id: "linus",
@@ -145,6 +155,7 @@ describe("resolveAgentConfig", () => {
       },
     };
     expect(resolveAgentModelFallbacksOverride(cfgNoOverride, "linus")).toBe(undefined);
+    expect(resolveAgentModelRoutingPolicy(cfgNoOverride, "linus")).toBe("lowest-cost");
 
     // Explicit empty list disables global fallbacks for that agent.
     const cfgDisable: OpenClawConfig = {
@@ -240,6 +251,7 @@ describe("resolveAgentConfig", () => {
         defaults: {
           model: {
             fallbacks: ["openai/gpt-4.1"],
+            routingPolicy: "lowest-cost",
           },
         },
         list: [
@@ -247,6 +259,7 @@ describe("resolveAgentConfig", () => {
             id: "support",
             model: {
               fallbacks: ["openai/gpt-5.2"],
+              routingPolicy: "configured",
             },
           },
         ],
@@ -267,6 +280,20 @@ describe("resolveAgentConfig", () => {
         sessionKey: "agent:support:session",
       }),
     ).toEqual(["openai/gpt-5.2"]);
+    expect(
+      resolveRunModelRoutingPolicy({
+        cfg,
+        agentId: "support",
+        sessionKey: "agent:main:session",
+      }),
+    ).toBe("configured");
+    expect(
+      resolveRunModelRoutingPolicy({
+        cfg,
+        agentId: "main",
+        sessionKey: "agent:main:session",
+      }),
+    ).toBe("lowest-cost");
   });
 
   it("computes whether any model fallbacks are configured via shared helper", () => {

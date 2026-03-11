@@ -4,6 +4,7 @@ import {
   resolveAgentModelPrimaryValue,
   resolveAgentModelRoutingPolicy,
 } from "../config/model-input.js";
+import type { AgentModelRoutingPolicy } from "../config/types.agents-shared.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
@@ -616,6 +617,8 @@ export async function runWithModelFallback<T>(params: {
   model: string;
   runId?: string;
   agentDir?: string;
+  /** Optional routing policy for the fallback chain. */
+  routingPolicy?: AgentModelRoutingPolicy;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
   run: ModelFallbackRunFn<T>;
@@ -632,9 +635,10 @@ export async function runWithModelFallback<T>(params: {
     agentDir: params.agentDir,
     preserveFirstCandidate: true,
     policy:
-      params.fallbacksOverride === undefined
+      params.routingPolicy ??
+      (params.fallbacksOverride === undefined
         ? resolveAgentModelRoutingPolicy(params.cfg?.agents?.defaults?.model)
-        : undefined,
+        : undefined),
   });
   const authStore = params.cfg
     ? ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false })

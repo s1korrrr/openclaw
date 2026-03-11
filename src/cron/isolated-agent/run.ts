@@ -1,6 +1,7 @@
 import {
   resolveAgentConfig,
   resolveAgentDir,
+  resolveAgentModelRoutingPolicy,
   resolveAgentModelFallbacksOverride,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
@@ -568,6 +569,9 @@ export async function runCronIsolatedAgentTurn(params: {
         model,
         runId: cronSession.sessionEntry.sessionId,
         agentDir,
+        routingPolicy: payloadFallbacks
+          ? "configured"
+          : resolveAgentModelRoutingPolicy(params.cfg, agentId),
         fallbacksOverride:
           payloadFallbacks ?? resolveAgentModelFallbacksOverride(params.cfg, agentId),
         run: async (providerOverride, modelOverride, runOptions) => {

@@ -10,6 +10,7 @@ const log = createSubsystemLogger("commands/agent");
 import {
   listAgentIds,
   resolveAgentDir,
+  resolveAgentModelRoutingPolicy,
   resolveEffectiveModelFallbacks,
   resolveSessionAgentId,
   resolveAgentSkillsFilter,
@@ -1105,6 +1106,7 @@ async function agentCommandInternal(
         model,
         runId,
         agentDir,
+        routingPolicy: resolveAgentModelRoutingPolicy(cfg, sessionAgentId),
         fallbacksOverride: effectiveFallbacksOverride,
         run: (providerOverride, modelOverride, runOptions) => {
           const isFallbackRetry = fallbackAttemptIndex > 0;
