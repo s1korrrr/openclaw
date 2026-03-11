@@ -1,6 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { toToolDefinitions } from "./pi-tool-definition-adapter.js";
 
 type ToolExecute = ReturnType<typeof toToolDefinitions>[number]["execute"];
@@ -41,6 +41,12 @@ describe("pi tool definition adapter", () => {
     expect(result.details).toMatchObject({
       status: "error",
       tool: "boom",
+      reliability: {
+        attempts: 1,
+        retried: false,
+        retryable: false,
+        classification: "permanent",
+      },
     });
     expect(result.details).toMatchObject({ error: "nope" });
     expect(JSON.stringify(result.details)).not.toContain("\n    at ");
@@ -96,5 +102,84 @@ describe("pi tool definition adapter", () => {
     });
     expect(result.content[0]).toMatchObject({ type: "text" });
     expect((result.content[0] as { text?: string }).text).toContain('"count"');
+  });
+
+  it("retries transient thrown tool failures once before succeeding", async () => {
+    const transient = new Error("socket hang up");
+    (transient as Error & { code?: string }).code = "ECONNRESET";
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce({
+        content: [{ type: "text" as const, text: "ok" }],
+        details: { ok: true },
+      });
+    const tool = {
+      name: "browser_open",
+      label: "Browser Open",
+      description: "retries transient failures",
+      parameters: Type.Object({}),
+      execute: execute as unknown as AgentTool["execute"],
+    } satisfies AgentTool;
+
+    const result = await executeTool(tool, "call5");
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result.details).toEqual({ ok: true });
+    expect(result.content[0]).toMatchObject({ type: "text", text: "ok" });
+  });
+
+  it("returns structured retry metadata when transient failures exhaust retries", async () => {
+    const transient = new Error("temporary upstream failure");
+    (transient as Error & { status?: number }).status = 503;
+    const execute = vi.fn().mockRejectedValue(transient);
+    const tool = {
+      name: "browser_open",
+      label: "Browser Open",
+      description: "transient failures keep failing",
+      parameters: Type.Object({}),
+      execute: execute as unknown as AgentTool["execute"],
+    } satisfies AgentTool;
+
+    const result = await executeTool(tool, "call6");
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(result.details).toMatchObject({
+      status: "error",
+      tool: "browser_open",
+      error: "temporary upstream failure",
+      reliability: {
+        attempts: 2,
+        retried: true,
+        retryable: true,
+        classification: "transient",
+        status: 503,
+      },
+    });
+  });
+
+  it("does not retry permanent thrown tool failures", async () => {
+    const execute = vi.fn().mockRejectedValue(new Error("invalid request"));
+    const tool = {
+      name: "browser_open",
+      label: "Browser Open",
+      description: "permanent failure",
+      parameters: Type.Object({}),
+      execute: execute as unknown as AgentTool["execute"],
+    } satisfies AgentTool;
+
+    const result = await executeTool(tool, "call7");
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.details).toMatchObject({
+      status: "error",
+      tool: "browser_open",
+      reliability: {
+        attempts: 1,
+        retried: false,
+        retryable: false,
+        classification: "permanent",
+      },
+    });
   });
 });

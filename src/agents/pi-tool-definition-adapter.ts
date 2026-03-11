@@ -4,7 +4,7 @@ import type {
   AgentToolUpdateCallback,
 } from "@mariozechner/pi-agent-core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { logDebug, logError } from "../logger.js";
+import { logDebug, logError, logWarn } from "../logger.js";
 import { isPlainObject } from "../utils.js";
 import type { ClientToolDefinition } from "./pi-embedded-runner/run/params.js";
 import type { HookContext } from "./pi-tools.before-tool-call.js";
@@ -35,6 +35,28 @@ type ToolExecuteArgs = ToolDefinition["execute"] extends (...args: infer P) => u
   ? P
   : ToolExecuteArgsCurrent;
 type ToolExecuteArgsAny = ToolExecuteArgs | ToolExecuteArgsLegacy | ToolExecuteArgsCurrent;
+type ToolExecutionFailureKind = "abort" | "permanent" | "transient";
+
+const TRANSIENT_TOOL_ERROR_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const TRANSIENT_TOOL_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "ENETDOWN",
+  "ENETRESET",
+  "ENETUNREACH",
+  "ETIMEDOUT",
+]);
+const TRANSIENT_TOOL_ERROR_MESSAGE_RE =
+  /\b(timeout|timed out|temporary|temporarily|transient|network error|connection reset|socket hang up|rate limit|too many requests|overloaded|unavailable|try again)\b/i;
+const NON_RETRYABLE_TOOL_ERROR_NAMES = new Set([
+  "AbortError",
+  "ToolAuthorizationError",
+  "ToolInputError",
+]);
+const MAX_TOOL_RELIABILITY_ATTEMPTS = 2;
+const DEFAULT_TRANSIENT_TOOL_RETRY_MS = 250;
 
 function isAbortSignal(value: unknown): value is AbortSignal {
   return typeof value === "object" && value !== null && "aborted" in value;
@@ -70,6 +92,98 @@ function describeToolExecutionError(err: unknown): {
     return { message, stack: err.stack };
   }
   return { message: String(err) };
+}
+
+function readErrorNumber(err: unknown, keys: string[]): number | undefined {
+  if (!err || typeof err !== "object") {
+    return undefined;
+  }
+  const record = err as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readErrorString(err: unknown, keys: string[]): string | undefined {
+  if (!err || typeof err !== "object") {
+    return undefined;
+  }
+  const record = err as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function classifyToolExecutionFailure(err: unknown): {
+  kind: ToolExecutionFailureKind;
+  message: string;
+  stack?: string;
+  status?: number;
+  code?: string;
+  retryAfterMs?: number;
+} {
+  const described = describeToolExecutionError(err);
+  const status = readErrorNumber(err, ["status", "statusCode", "httpStatus"]);
+  const code = readErrorString(err, ["code", "errno"]);
+  const retryAfterMs = readErrorNumber(err, ["retryAfterMs", "retry_after_ms"]);
+  const name =
+    err && typeof err === "object" && "name" in err && typeof err.name === "string"
+      ? err.name
+      : undefined;
+
+  if (name && NON_RETRYABLE_TOOL_ERROR_NAMES.has(name)) {
+    return {
+      kind: name === "AbortError" ? "abort" : "permanent",
+      message: described.message,
+      stack: described.stack,
+      status,
+      code,
+      retryAfterMs,
+    };
+  }
+
+  const transient =
+    (typeof status === "number" && TRANSIENT_TOOL_ERROR_STATUSES.has(status)) ||
+    (typeof code === "string" && TRANSIENT_TOOL_ERROR_CODES.has(code.toUpperCase())) ||
+    TRANSIENT_TOOL_ERROR_MESSAGE_RE.test(described.message);
+
+  return {
+    kind: transient ? "transient" : "permanent",
+    message: described.message,
+    stack: described.stack,
+    status,
+    code,
+    retryAfterMs,
+  };
+}
+
+async function waitForTransientRetry(delayMs: number, signal: AbortSignal | undefined) {
+  if (!(delayMs > 0)) {
+    return;
+  }
+  throwIfExecutionAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const error = new Error("This operation was aborted.");
+      error.name = "AbortError";
+      reject(error);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function stringifyToolPayload(payload: unknown): string {
@@ -173,13 +287,59 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
             executeParams = hookOutcome.params;
           }
           throwIfExecutionAborted(signal);
-          const rawResult = await tool.execute(toolCallId, executeParams, signal, onUpdate);
-          throwIfExecutionAborted(signal);
-          const result = normalizeToolExecutionResult({
-            toolName: normalizedName,
-            result: rawResult,
-          });
-          return result;
+          for (let attempt = 1; attempt <= MAX_TOOL_RELIABILITY_ATTEMPTS; attempt += 1) {
+            try {
+              const rawResult = await tool.execute(toolCallId, executeParams, signal, onUpdate);
+              throwIfExecutionAborted(signal);
+              const result = normalizeToolExecutionResult({
+                toolName: normalizedName,
+                result: rawResult,
+              });
+              return result;
+            } catch (err) {
+              if (signal?.aborted) {
+                throw err;
+              }
+              const failure = classifyToolExecutionFailure(err);
+              if (failure.kind === "abort") {
+                throw err;
+              }
+              const shouldRetry =
+                failure.kind === "transient" && attempt < MAX_TOOL_RELIABILITY_ATTEMPTS;
+              if (shouldRetry) {
+                const delayMs = failure.retryAfterMs ?? DEFAULT_TRANSIENT_TOOL_RETRY_MS;
+                logWarn(
+                  `[tools] ${normalizedName} transient failure on attempt ${attempt}/${MAX_TOOL_RELIABILITY_ATTEMPTS}: ${failure.message}; retrying in ${delayMs}ms`,
+                );
+                await waitForTransientRetry(delayMs, signal);
+                continue;
+              }
+              if (failure.stack && failure.stack !== failure.message) {
+                logDebug(`tools: ${normalizedName} failed stack:\n${failure.stack}`);
+              }
+              logError(
+                `[tools] ${normalizedName} failed after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${failure.message}`,
+              );
+
+              return jsonResult({
+                status: "error",
+                tool: normalizedName,
+                error: failure.message,
+                reliability: {
+                  attempts: attempt,
+                  retried: attempt > 1,
+                  retryable: failure.kind === "transient",
+                  classification: failure.kind,
+                  retryAfterMs: failure.retryAfterMs,
+                  status: failure.status,
+                  code: failure.code,
+                },
+              });
+            }
+          }
+          throw new Error(
+            `tool reliability wrapper exhausted without returning: ${normalizedName}`,
+          );
         } catch (err) {
           if (signal?.aborted) {
             throw err;
@@ -201,6 +361,12 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
             status: "error",
             tool: normalizedName,
             error: described.message,
+            reliability: {
+              attempts: 1,
+              retried: false,
+              retryable: false,
+              classification: "permanent",
+            },
           });
         }
       },
