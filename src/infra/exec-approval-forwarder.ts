@@ -18,6 +18,7 @@ import {
 } from "../utils/message-channel.js";
 import { resolveExecApprovalCommandDisplay } from "./exec-approval-command-display.js";
 import { buildExecApprovalPendingReplyPayload } from "./exec-approval-reply.js";
+import { formatExecApprovalRiskSummary } from "./exec-approval-risk.js";
 import type {
   ExecApprovalDecision,
   ExecApprovalRequest,
@@ -233,6 +234,10 @@ function buildRequestMessage(request: ExecApprovalRequest, nowMs: number) {
   if (request.request.host) {
     lines.push(`Host: ${request.request.host}`);
   }
+  const riskSummary = formatExecApprovalRiskSummary(request.request.risk);
+  if (riskSummary) {
+    lines.push(`Risk: ${riskSummary}`);
+  }
   if (request.request.agentId) {
     lines.push(`Agent: ${request.request.agentId}`);
   }
@@ -265,7 +270,9 @@ function decisionLabel(decision: ExecApprovalDecision): string {
 function buildResolvedMessage(resolved: ExecApprovalResolved) {
   const base = `✅ Exec approval ${decisionLabel(resolved.decision)}.`;
   const by = resolved.resolvedBy ? ` Resolved by ${resolved.resolvedBy}.` : "";
-  return `${base}${by} ID: ${resolved.id}`;
+  const riskSummary = formatExecApprovalRiskSummary(resolved.request?.risk);
+  const risk = riskSummary ? ` Risk: ${riskSummary}.` : "";
+  return `${base}${by}${risk} ID: ${resolved.id}`;
 }
 
 function buildExpiredMessage(request: ExecApprovalRequest) {
@@ -384,6 +391,7 @@ function buildRequestPayloadForTarget(
       nodeId: request.request.nodeId ?? undefined,
       expiresAtMs: request.expiresAtMs,
       nowMs: nowMsValue,
+      risk: request.request.risk ?? undefined,
     });
     const buttons = buildTelegramExecApprovalButtons(request.id);
     if (!buttons) {

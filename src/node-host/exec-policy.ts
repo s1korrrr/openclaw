@@ -54,6 +54,7 @@ export function evaluateSystemRunPolicy(params: {
   ask: ExecAsk;
   analysisOk: boolean;
   allowlistSatisfied: boolean;
+  checkpointRequiresApproval?: boolean;
   approvalDecision: ExecApprovalDecision;
   approved?: boolean;
   isWindows: boolean;
@@ -88,6 +89,7 @@ export function evaluateSystemRunPolicy(params: {
     analysisOk,
     allowlistSatisfied,
   });
+  const requiresCheckpointApproval = params.checkpointRequiresApproval === true;
   if (requiresAsk && !approvedByAsk) {
     return {
       allowed: false,
@@ -98,6 +100,20 @@ export function evaluateSystemRunPolicy(params: {
       shellWrapperBlocked,
       windowsShellWrapperBlocked,
       requiresAsk,
+      approvalDecision: params.approvalDecision,
+      approvedByAsk,
+    };
+  }
+  if (requiresCheckpointApproval && !approvedByAsk) {
+    return {
+      allowed: false,
+      eventReason: "approval-required",
+      errorMessage: "SYSTEM_RUN_DENIED: approval required",
+      analysisOk,
+      allowlistSatisfied,
+      shellWrapperBlocked,
+      windowsShellWrapperBlocked,
+      requiresAsk: true,
       approvalDecision: params.approvalDecision,
       approvedByAsk,
     };
@@ -127,7 +143,7 @@ export function evaluateSystemRunPolicy(params: {
     allowlistSatisfied,
     shellWrapperBlocked,
     windowsShellWrapperBlocked,
-    requiresAsk,
+    requiresAsk: requiresAsk || requiresCheckpointApproval,
     approvalDecision: params.approvalDecision,
     approvedByAsk,
   };

@@ -40,6 +40,13 @@ function getFirstDeliveryText(deliver: ReturnType<typeof vi.fn>): string {
   return firstCall?.payloads?.[0]?.text ?? "";
 }
 
+function getDeliveryText(deliver: ReturnType<typeof vi.fn>, index: number): string {
+  const call = deliver.mock.calls[index]?.[0] as
+    | { payloads?: Array<{ text?: string }> }
+    | undefined;
+  return call?.payloads?.[0]?.text ?? "";
+}
+
 const TARGETS_CFG = {
   approvals: {
     exec: {
@@ -292,6 +299,39 @@ describe("exec approval forwarder", () => {
     expect(text).toContain("Command: `echo hello`");
     expect(text).toContain("Expires in: 5s");
     expect(text).toContain("Reply with: /approve <id> allow-once|allow-always|deny");
+  });
+
+  it("includes risk metadata in forwarded request and resolved messages", async () => {
+    vi.useFakeTimers();
+    const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
+    const request = {
+      ...baseRequest,
+      request: {
+        ...baseRequest.request,
+        risk: {
+          tier: "high",
+          reasons: ["node-host", "mutable-file-operand"],
+          checkpointThreshold: "medium",
+        },
+      },
+    };
+
+    await expect(forwarder.handleRequested(request)).resolves.toBe(true);
+    await Promise.resolve();
+    expect(getDeliveryText(deliver, 0)).toContain(
+      "Risk: high (checkpoint >= medium; node host, mutable file target)",
+    );
+
+    await forwarder.handleResolved({
+      id: request.id,
+      decision: "allow-once",
+      resolvedBy: "slack:U1",
+      ts: 2000,
+      request: request.request,
+    });
+    expect(getDeliveryText(deliver, 1)).toContain(
+      "Risk: high (checkpoint >= medium; node host, mutable file target)",
+    );
   });
 
   it("formats complex commands as fenced code blocks", async () => {

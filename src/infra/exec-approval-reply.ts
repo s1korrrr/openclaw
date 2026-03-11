@@ -1,4 +1,6 @@
 import type { ReplyPayload } from "../auto-reply/types.js";
+import type { ExecApprovalRiskMetadata } from "./exec-approval-risk.js";
+import { formatExecApprovalRiskSummary } from "./exec-approval-risk.js";
 import type { ExecHost } from "./exec-approvals.js";
 
 export type ExecApprovalReplyDecision = "allow-once" | "allow-always" | "deny";
@@ -24,6 +26,7 @@ export type ExecApprovalPendingReplyParams = {
   nodeId?: string;
   expiresAtMs?: number;
   nowMs?: number;
+  risk?: ExecApprovalRiskMetadata;
 };
 
 export type ExecApprovalUnavailableReplyParams = {
@@ -101,6 +104,10 @@ export function buildExecApprovalPendingReplyPayload(
   info.push(`Host: ${params.host}`);
   if (params.nodeId) {
     info.push(`Node: ${params.nodeId}`);
+  }
+  const riskSummary = formatExecApprovalRiskSummary(params.risk);
+  if (riskSummary) {
+    info.push(`Risk: ${riskSummary}`);
   }
   if (params.cwd) {
     info.push(`CWD: ${params.cwd}`);

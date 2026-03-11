@@ -4,6 +4,7 @@ import {
   buildExecApprovalPendingReplyPayload,
   buildExecApprovalUnavailableReplyPayload,
 } from "../infra/exec-approval-reply.js";
+import type { ExecApprovalRiskMetadata } from "../infra/exec-approval-risk.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import type { PluginHookAfterToolCallEvent } from "../plugins/types.js";
 import { getAgentLoopTrace } from "./agent-loop-trace.js";
@@ -154,6 +155,7 @@ function readExecApprovalPendingDetails(result: unknown): {
   cwd?: string;
   nodeId?: string;
   warningText?: string;
+  risk?: ExecApprovalRiskMetadata;
 } | null {
   if (!result || typeof result !== "object") {
     return null;
@@ -182,6 +184,44 @@ function readExecApprovalPendingDetails(result: unknown): {
     cwd: typeof details.cwd === "string" ? details.cwd : undefined,
     nodeId: typeof details.nodeId === "string" ? details.nodeId : undefined,
     warningText: typeof details.warningText === "string" ? details.warningText : undefined,
+    risk: parseExecApprovalRisk(details.risk),
+  };
+}
+
+function parseExecApprovalRisk(value: unknown): ExecApprovalRiskMetadata | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as {
+    tier?: unknown;
+    reasons?: unknown;
+    checkpointThreshold?: unknown;
+  };
+  if (record.tier !== "low" && record.tier !== "medium" && record.tier !== "high") {
+    return undefined;
+  }
+  if (!Array.isArray(record.reasons)) {
+    return undefined;
+  }
+  const reasons = record.reasons.filter(
+    (
+      reason,
+    ): reason is "node-host" | "full-security" | "mutable-file-operand" | "obfuscated-command" =>
+      reason === "node-host" ||
+      reason === "full-security" ||
+      reason === "mutable-file-operand" ||
+      reason === "obfuscated-command",
+  );
+  const checkpointThreshold =
+    record.checkpointThreshold === "low" ||
+    record.checkpointThreshold === "medium" ||
+    record.checkpointThreshold === "high"
+      ? record.checkpointThreshold
+      : undefined;
+  return {
+    tier: record.tier,
+    reasons,
+    checkpointThreshold,
   };
 }
 
@@ -245,6 +285,7 @@ async function emitToolResultOutput(params: {
           nodeId: approvalPending.nodeId,
           expiresAtMs: approvalPending.expiresAtMs,
           warningText: approvalPending.warningText,
+          risk: approvalPending.risk,
         }),
       );
       ctx.state.deterministicApprovalPromptSent = true;

@@ -9,6 +9,16 @@ const ExecApprovalForwardTargetSchema = z
   })
   .strict();
 
+const ExecApprovalCheckpointSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    requireAtOrAbove: z
+      .union([z.literal("low"), z.literal("medium"), z.literal("high")])
+      .optional(),
+  })
+  .strict()
+  .optional();
+
 const ExecApprovalForwardingSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -16,6 +26,7 @@ const ExecApprovalForwardingSchema = z
     agentFilter: z.array(z.string()).optional(),
     sessionFilter: z.array(z.string()).optional(),
     targets: z.array(ExecApprovalForwardTargetSchema).optional(),
+    checkpoints: ExecApprovalCheckpointSchema,
   })
   .strict()
   .optional();

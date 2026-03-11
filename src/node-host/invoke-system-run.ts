@@ -3,6 +3,11 @@ import { resolveAgentConfig } from "../agents/agent-scope.js";
 import { loadConfig } from "../config/config.js";
 import type { GatewayClient } from "../gateway/client.js";
 import {
+  classifyExecApprovalRisk,
+  resolveExecApprovalCheckpointThreshold,
+  shouldRequireExecApprovalCheckpoint,
+} from "../infra/exec-approval-risk.js";
+import {
   addAllowlistEntry,
   recordAllowlistUse,
   resolveAllowAlwaysPatterns,
@@ -264,6 +269,17 @@ async function evaluateSystemRunPolicyPhase(
   });
   const security = approvals.agent.security;
   const ask = approvals.agent.ask;
+  const checkpointThreshold = resolveExecApprovalCheckpointThreshold(
+    cfg.approvals?.exec?.checkpoints,
+  );
+  const checkpointRequiresApproval = shouldRequireExecApprovalCheckpoint({
+    risk: classifyExecApprovalRisk({
+      host: "node",
+      security,
+      systemRunPlan: parsed.approvalPlan,
+    }),
+    checkpointThreshold,
+  });
   const autoAllowSkills = approvals.agent.autoAllowSkills;
   const { safeBins, safeBinProfiles, trustedSafeBinDirs } = resolveExecSafeBinRuntimePolicy({
     global: cfg.tools?.exec,
@@ -293,6 +309,7 @@ async function evaluateSystemRunPolicyPhase(
     ask,
     analysisOk,
     allowlistSatisfied,
+    checkpointRequiresApproval,
     approvalDecision: parsed.approvalDecision,
     approved: parsed.approved,
     isWindows,

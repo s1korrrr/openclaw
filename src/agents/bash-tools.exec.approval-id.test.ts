@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearConfigCache } from "../config/config.js";
+import { withTempConfig } from "../gateway/test-temp-config.js";
 import { buildSystemRunPreparePayload } from "../test-utils/system-run-prepare-payload.js";
 
 vi.mock("./tools/gateway.js", () => ({
@@ -122,8 +123,10 @@ describe("exec approvals", () => {
     expect(pendingText).toContain(`full ${details.approvalId}`);
     expect(pendingText).toContain("Host: node");
     expect(pendingText).toContain("Node: node-1");
+    expect(pendingText).toContain("Risk: high (node host)");
     expect(pendingText).toContain(`CWD: ${process.cwd()}`);
-    expect(pendingText).toContain("Command:\n```sh\nls -la\n```");
+    expect(pendingText).toContain("Command:\n```sh\n");
+    expect(pendingText).toContain("ls -la");
     expect(pendingText).toContain("Mode: foreground (interactive approvals available).");
     expect(pendingText).toContain("Background mode requires pre-approved policy");
     const approvalId = details.approvalId;
@@ -282,6 +285,53 @@ describe("exec approvals", () => {
     expect(result.details.status).toBe("completed");
     expect(calls).not.toContain("exec.approval.request");
     expect(calls).not.toContain("exec.approval.waitDecision");
+  });
+
+  it("forces approval when a configured risk checkpoint threshold is crossed", async () => {
+    let approvalRequestParams: unknown;
+    vi.mocked(callGatewayTool).mockImplementation(async (method, _opts, params) => {
+      if (method === "exec.approval.request") {
+        approvalRequestParams = params;
+        return { status: "accepted", id: (params as { id?: string })?.id };
+      }
+      if (method === "exec.approval.waitDecision") {
+        return { decision: "deny" };
+      }
+      return { ok: true };
+    });
+
+    await withTempConfig({
+      cfg: {
+        approvals: {
+          exec: {
+            checkpoints: {
+              enabled: true,
+              requireAtOrAbove: "medium",
+            },
+          },
+        },
+      },
+      run: async () => {
+        const tool = createExecTool({
+          ask: "off",
+          security: "full",
+          approvalRunningNoticeMs: 0,
+          elevated: { enabled: true, allowed: true, defaultLevel: "ask" },
+        });
+
+        const result = await tool.execute("call3d", { command: "echo ok", elevated: true });
+        expect(result.details.status).toBe("approval-pending");
+        expect(approvalRequestParams).toMatchObject({
+          risk: {
+            tier: "medium",
+            reasons: ["full-security"],
+            checkpointThreshold: "medium",
+          },
+        });
+        const pendingText = result.content.find((part) => part.type === "text")?.text ?? "";
+        expect(pendingText).toContain("Risk: medium (checkpoint >= medium; full security)");
+      },
+    });
   });
 
   it("requires approval for elevated ask when allowlist misses", async () => {
@@ -450,9 +500,9 @@ describe("exec approvals", () => {
 
     expect(result.details.status).toBe("approval-pending");
     const pendingText = result.content.find((part) => part.type === "text")?.text ?? "";
-    expect(pendingText).toContain(
-      "Command:\n```sh\nnpm view diver --json | jq .name && brew outdated\n```",
-    );
+    expect(pendingText).toContain("Risk: low");
+    expect(pendingText).toContain("Command:\n```sh\n");
+    expect(pendingText).toContain("npm view diver --json | jq .name && brew outdated");
     expect(calls).toContain("exec.approval.request");
   });
 
@@ -482,9 +532,9 @@ describe("exec approvals", () => {
 
     expect(result.details.status).toBe("approval-pending");
     const pendingText = result.content.find((part) => part.type === "text")?.text ?? "";
-    expect(pendingText).toContain(
-      "Command:\n```sh\nnpm view diver --json | jq .name && brew outdated\n```",
-    );
+    expect(pendingText).toContain("Risk: high (node host, full security)");
+    expect(pendingText).toContain("Command:\n```sh\n");
+    expect(pendingText).toContain("npm view diver --json | jq .name && brew outdated");
     expect(calls).toContain("exec.approval.request");
   });
 

@@ -1,4 +1,5 @@
 export type ExecApprovalForwardingMode = "session" | "targets" | "both";
+export type ExecApprovalRiskTier = "low" | "medium" | "high";
 
 export type ExecApprovalForwardTarget = {
   /** Channel id (e.g. "discord", "slack", or plugin channel id). */
@@ -9,6 +10,13 @@ export type ExecApprovalForwardTarget = {
   accountId?: string;
   /** Optional thread id to reply inside a thread. */
   threadId?: string | number;
+};
+
+export type ExecApprovalCheckpointConfig = {
+  /** Enable risk-tiered exec approval checkpoints. Default: false. */
+  enabled?: boolean;
+  /** Require approval at or above this risk tier. Default: high. */
+  requireAtOrAbove?: ExecApprovalRiskTier;
 };
 
 export type ExecApprovalForwardingConfig = {
@@ -22,6 +30,8 @@ export type ExecApprovalForwardingConfig = {
   sessionFilter?: string[];
   /** Explicit delivery targets (used when mode includes targets). */
   targets?: ExecApprovalForwardTarget[];
+  /** Optional risk-tier policy that forces exec approval at or above a configured threshold. */
+  checkpoints?: ExecApprovalCheckpointConfig;
 };
 
 export type ApprovalsConfig = {

@@ -174,4 +174,47 @@ describe("requestExecApprovalDecision", () => {
     expect(result).toBe("deny");
     expect(vi.mocked(callGatewayTool).mock.calls).toHaveLength(1);
   });
+
+  it("forwards risk metadata when provided", async () => {
+    vi.mocked(callGatewayTool)
+      .mockResolvedValueOnce({
+        status: "accepted",
+        id: "approval-risk-id",
+        expiresAtMs: DEFAULT_APPROVAL_TIMEOUT_MS,
+      })
+      .mockResolvedValueOnce({ decision: "allow-once" });
+
+    await expect(
+      requestExecApprovalDecision({
+        id: "approval-risk-id",
+        cwd: "/tmp",
+        nodeId: "node-1",
+        host: "node",
+        security: "full",
+        ask: "off",
+        risk: {
+          tier: "high",
+          reasons: ["node-host", "mutable-file-operand"],
+          checkpointThreshold: "medium",
+        },
+      }),
+    ).resolves.toBe("allow-once");
+
+    expect(callGatewayTool).toHaveBeenNthCalledWith(
+      1,
+      "exec.approval.request",
+      { timeoutMs: DEFAULT_APPROVAL_REQUEST_TIMEOUT_MS },
+      expect.objectContaining({
+        id: "approval-risk-id",
+        host: "node",
+        nodeId: "node-1",
+        risk: {
+          tier: "high",
+          reasons: ["node-host", "mutable-file-operand"],
+          checkpointThreshold: "medium",
+        },
+      }),
+      { expectFinal: false },
+    );
+  });
 });

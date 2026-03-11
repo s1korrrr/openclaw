@@ -668,6 +668,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional account selector for multi-account channel setups when approvals must route through a specific account context. Use this only when the target channel has multiple configured identities.",
   "approvals.exec.targets[].threadId":
     "Optional thread/topic target for channels that support threaded delivery of forwarded approvals. Use this to keep approval traffic contained in operational threads instead of main channels.",
+  "approvals.exec.checkpoints":
+    "Risk-tiered exec checkpoint policy that can force human approval at or above a configured risk threshold even when exec ask mode would otherwise run without prompting. Use this to add explicit HITL guardrails for sensitive exec transitions.",
+  "approvals.exec.checkpoints.enabled":
+    "Enables risk-tiered exec checkpoints (default: false). Keep disabled to preserve current exec approval behavior, or enable when you want approval forced for medium/high-risk exec paths regardless of ask=off.",
+  "approvals.exec.checkpoints.requireAtOrAbove":
+    'Minimum exec risk tier that must trigger approval when checkpoints are enabled: "low", "medium", or "high" (default: "high"). Use "medium" to gate host-full gateway runs, and "high" to reserve mandatory approvals for node/external-write style exec paths.',
   "tools.fs.workspaceOnly":
     "Restrict filesystem tools (read/write/edit/apply_patch) to the workspace directory (default: false).",
   "tools.sessions.visibility":
