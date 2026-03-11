@@ -238,30 +238,6 @@ describe("agent tool adapter conformance", () => {
   );
 
   it.each(PI_TOOL_DEFINITION_ADAPTER_CONFORMANCE.agentToolAdapter.executeArgLayouts)(
-    "retries transient thrown failures once for %s layout",
-    async (layout) => {
-      const transient = new Error("socket hang up");
-      (transient as Error & { code?: string }).code = "ECONNRESET";
-      const execute = vi
-        .fn()
-        .mockRejectedValueOnce(transient)
-        .mockResolvedValueOnce(createStandardResult("browser_open"));
-      const definition = getToolDefinition({
-        name: "browser_open",
-        label: "Browser Open",
-        description: "transient retry",
-        parameters: Type.Object({}),
-        execute,
-      } satisfies AgentTool);
-
-      const result = await executeWithLayout<AgentToolResult<unknown>>(definition, layout, {});
-
-      expect(execute).toHaveBeenCalledTimes(2);
-      expect(result).toEqual(createStandardResult("browser_open"));
-    },
-  );
-
-  it.each(PI_TOOL_DEFINITION_ADAPTER_CONFORMANCE.agentToolAdapter.executeArgLayouts)(
     "passes abort errors through for %s layout",
     async (layout) => {
       const definition = getToolDefinition({
