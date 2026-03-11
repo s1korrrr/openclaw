@@ -3,10 +3,16 @@ import type { OpenClawConfig } from "../../config/config.js";
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
+  resolveAgentModelRoutingPolicy,
 } from "../../config/model-input.js";
+import type { AgentModelRoutingPolicy } from "../../config/types.agents-shared.js";
 import { extractAssistantText } from "../pi-embedded-utils.js";
 
-export type ImageModelConfig = { primary?: string; fallbacks?: string[] };
+export type ImageModelConfig = {
+  primary?: string;
+  fallbacks?: string[];
+  routingPolicy?: AgentModelRoutingPolicy;
+};
 
 export function decodeDataUrl(dataUrl: string): {
   buffer: Buffer;
@@ -57,9 +63,11 @@ export function coerceImageAssistantText(params: {
 export function coerceImageModelConfig(cfg?: OpenClawConfig): ImageModelConfig {
   const primary = resolveAgentModelPrimaryValue(cfg?.agents?.defaults?.imageModel);
   const fallbacks = resolveAgentModelFallbackValues(cfg?.agents?.defaults?.imageModel);
+  const routingPolicy = resolveAgentModelRoutingPolicy(cfg?.agents?.defaults?.imageModel);
   return {
     ...(primary?.trim() ? { primary: primary.trim() } : {}),
     ...(fallbacks.length > 0 ? { fallbacks } : {}),
+    ...(routingPolicy ? { routingPolicy } : {}),
   };
 }
 

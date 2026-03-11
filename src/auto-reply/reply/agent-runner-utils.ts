@@ -1,5 +1,5 @@
 import {
-  resolveRunModelFallbackOrdering,
+  resolveRunModelRoutingPolicy,
   resolveRunModelFallbacksOverride,
 } from "../../agents/agent-scope.js";
 import type { NormalizedUsage } from "../../agents/usage.js";
@@ -163,7 +163,7 @@ export function resolveModelFallbackOptions(run: FollowupRun["run"]) {
     provider: run.provider,
     model: run.model,
     agentDir: run.agentDir,
-    fallbackOrdering: resolveRunModelFallbackOrdering({
+    routingPolicy: resolveRunModelRoutingPolicy({
       cfg: run.config,
       agentId: run.agentId,
       sessionKey: run.sessionKey,

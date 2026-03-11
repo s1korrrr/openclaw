@@ -1,7 +1,7 @@
 import type { ChannelId } from "../channels/plugins/types.js";
 import type {
   AgentModelConfig,
-  AgentModelFallbackOrdering,
+  AgentModelRoutingPolicy,
   AgentSandboxConfig,
 } from "./types.agents-shared.js";
 import type {
@@ -23,7 +23,7 @@ export type AgentModelEntryConfig = {
 export type AgentModelListConfig = {
   primary?: string;
   fallbacks?: string[];
-  fallbackOrdering?: AgentModelFallbackOrdering;
+  routingPolicy?: AgentModelRoutingPolicy;
 };
 
 export type AgentContextPruningConfig = {

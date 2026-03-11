@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
 import {
-  resolveAgentModelFallbackOrderingValue,
   resolveAgentModelFallbackValues,
+  resolveAgentModelRoutingPolicy as resolveModelRoutingPolicyValue,
 } from "../config/model-input.js";
 import { resolveStateDir } from "../config/paths.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -208,14 +208,14 @@ export function resolveAgentModelFallbacksOverride(
   return Array.isArray(raw.fallbacks) ? raw.fallbacks : undefined;
 }
 
-export function resolveAgentModelFallbackOrdering(
+export function resolveAgentModelRoutingPolicy(
   cfg: OpenClawConfig,
   agentId: string,
 ): "configured" | "lowest-cost" | undefined {
   const raw = resolveAgentConfig(cfg, agentId)?.model;
   return (
-    resolveAgentModelFallbackOrderingValue(raw) ??
-    resolveAgentModelFallbackOrderingValue(cfg.agents?.defaults?.model)
+    resolveModelRoutingPolicyValue(raw) ??
+    resolveModelRoutingPolicyValue(cfg.agents?.defaults?.model)
   );
 }
 
@@ -244,7 +244,7 @@ export function resolveRunModelFallbacksOverride(params: {
   );
 }
 
-export function resolveRunModelFallbackOrdering(params: {
+export function resolveRunModelRoutingPolicy(params: {
   cfg: OpenClawConfig | undefined;
   agentId?: string | null;
   sessionKey?: string | null;
@@ -252,7 +252,7 @@ export function resolveRunModelFallbackOrdering(params: {
   if (!params.cfg) {
     return undefined;
   }
-  return resolveAgentModelFallbackOrdering(
+  return resolveAgentModelRoutingPolicy(
     params.cfg,
     resolveFallbackAgentId({ agentId: params.agentId, sessionKey: params.sessionKey }),
   );

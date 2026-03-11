@@ -15,6 +15,26 @@ import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixtu
 
 const makeCfg = makeModelFallbackCfg;
 
+function makeModelDefinition(
+  id: string,
+  cost: { input: number; output: number; cacheRead?: number; cacheWrite?: number },
+): ModelDefinitionConfig {
+  return {
+    id,
+    name: id,
+    reasoning: false,
+    input: ["text"],
+    cost: {
+      input: cost.input,
+      output: cost.output,
+      cacheRead: cost.cacheRead ?? 0,
+      cacheWrite: cost.cacheWrite ?? 0,
+    },
+    contextWindow: 16_000,
+    maxTokens: 4_096,
+  };
+}
+
 function makeFallbacksOnlyCfg(): OpenClawConfig {
   return {
     agents: {
@@ -38,18 +58,6 @@ function makeProviderFallbackCfg(provider: string): OpenClawConfig {
       },
     },
   });
-}
-
-function makeDeclaredCostModel(id: string, inputCost: number): ModelDefinitionConfig {
-  return {
-    id,
-    name: id,
-    reasoning: false,
-    input: ["text"],
-    cost: { input: inputCost, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 200_000,
-    maxTokens: 8_192,
-  };
 }
 
 async function withTempAuthStore<T>(
@@ -389,6 +397,120 @@ describe("runWithModelFallback", () => {
     ]);
   });
 
+  it("reorders configured fallback candidates by lowest declared cost when routingPolicy=lowest-cost", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["anthropic/claude-haiku-3-5", "groq/llama-3.3-70b"],
+            routingPolicy: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          anthropic: {
+            api: "openai-responses",
+            baseUrl: "https://example.com/anthropic",
+            models: [makeModelDefinition("claude-haiku-3-5", { input: 2.5, output: 10 })],
+          },
+          groq: {
+            api: "openai-responses",
+            baseUrl: "https://example.com/groq",
+            models: [makeModelDefinition("llama-3.3-70b", { input: 0.3, output: 0.8 })],
+          },
+        },
+      },
+    });
+
+    const run = vi.fn().mockImplementation(async (provider: string, model: string) => {
+      if (provider === "openai" && model === "gpt-4.1-mini") {
+        throw Object.assign(new Error("rate limited"), { status: 429 });
+      }
+      if (provider === "groq" && model === "llama-3.3-70b") {
+        return "cheap success";
+      }
+      throw new Error(`unexpected fallback candidate: ${provider}/${model}`);
+    });
+
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      run,
+    });
+
+    expect(result.result).toBe("cheap success");
+    expect(run.mock.calls).toEqual([
+      ["openai", "gpt-4.1-mini"],
+      ["groq", "llama-3.3-70b"],
+    ]);
+  });
+
+  it("keeps missing-cost candidates in their configured relative order after known cheaper fallbacks", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: [
+              "missing-a-provider/missing-a",
+              "missing-b-provider/missing-b",
+              "groq/llama-3.3-70b",
+            ],
+            routingPolicy: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          groq: {
+            api: "openai-responses",
+            baseUrl: "https://example.com/groq",
+            models: [makeModelDefinition("llama-3.3-70b", { input: 0.2, output: 0.7 })],
+          },
+        },
+      },
+    });
+
+    const run = vi.fn().mockImplementation(async (provider: string, model: string) => {
+      if (provider === "openai" && model === "gpt-4.1-mini") {
+        throw Object.assign(new Error("rate limited"), { status: 429 });
+      }
+      if (provider === "groq" && model === "llama-3.3-70b") {
+        throw Object.assign(new Error("still rate limited"), { status: 429 });
+      }
+      if (provider === "missing-a-provider" && model === "missing-a") {
+        return "missing-a success";
+      }
+      throw new Error(`unexpected fallback candidate: ${provider}/${model}`);
+    });
+
+    const result = await withTempAuthStore(
+      {
+        version: AUTH_STORE_VERSION,
+        profiles: {},
+        usageStats: {},
+      },
+      async (tempDir) =>
+        runWithModelFallback({
+          cfg,
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          agentDir: tempDir,
+          run,
+        }),
+    );
+
+    expect(result.result).toBe("missing-a success");
+    expect(run.mock.calls).toEqual([
+      ["openai", "gpt-4.1-mini"],
+      ["groq", "llama-3.3-70b"],
+      ["missing-a-provider", "missing-a"],
+    ]);
+  });
+
   it("falls back on transient HTTP 5xx errors", async () => {
     await expectFallsBackToHaiku({
       provider: "openai",
@@ -721,71 +843,14 @@ describe("runWithModelFallback", () => {
     ]);
   });
 
-  it("reorders configured fallback chains by declared cost when opted in", async () => {
-    const cfg = makeCfg({
-      agents: {
-        defaults: {
-          model: {
-            primary: "openai/gpt-4.1-mini",
-            fallbacks: [
-              "anthropic/claude-sonnet-4",
-              "openai/gpt-5-nano",
-              "google/gemini-2.5-flash",
-            ],
-            fallbackOrdering: "lowest-cost",
-          },
-        },
-      },
-      models: {
-        providers: {
-          openai: {
-            baseUrl: "https://example.test/openai",
-            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
-          },
-          anthropic: {
-            baseUrl: "https://example.test/anthropic",
-            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
-          },
-          google: {
-            baseUrl: "https://example.test/google",
-            models: [makeDeclaredCostModel("gemini-2.5-flash", 0.8)],
-          },
-        },
-      },
-    });
-
-    const calls: Array<{ provider: string; model: string }> = [];
-    const result = await runWithModelFallback({
-      cfg,
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      run: async (provider, model) => {
-        calls.push({ provider, model });
-        if (provider === "openai" && model === "gpt-4.1-mini") {
-          throw Object.assign(new Error("rate limited"), { status: 429 });
-        }
-        if (provider === "openai" && model === "gpt-5-nano") {
-          return "ok";
-        }
-        throw new Error(`unexpected candidate: ${provider}/${model}`);
-      },
-    });
-
-    expect(result.result).toBe("ok");
-    expect(calls).toEqual([
-      { provider: "openai", model: "gpt-4.1-mini" },
-      { provider: "openai", model: "gpt-5-nano" },
-    ]);
-  });
-
-  it("keeps explicit fallbacksOverride order unless the caller opts into cost ordering", async () => {
+  it("keeps explicit fallbacksOverride order unless the caller opts into routingPolicy=lowest-cost", async () => {
     const cfg = makeCfg({
       agents: {
         defaults: {
           model: {
             primary: "openai/gpt-4.1-mini",
             fallbacks: ["openai/gpt-5-nano", "anthropic/claude-sonnet-4"],
-            fallbackOrdering: "lowest-cost",
+            routingPolicy: "lowest-cost",
           },
         },
       },
@@ -793,11 +858,11 @@ describe("runWithModelFallback", () => {
         providers: {
           openai: {
             baseUrl: "https://example.test/openai",
-            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
+            models: [makeModelDefinition("gpt-5-nano", { input: 0.2, output: 0.5 })],
           },
           anthropic: {
             baseUrl: "https://example.test/anthropic",
-            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
+            models: [makeModelDefinition("claude-sonnet-4", { input: 3, output: 9 })],
           },
         },
       },
@@ -828,17 +893,17 @@ describe("runWithModelFallback", () => {
     ]);
   });
 
-  it("can reorder explicit fallbacksOverride by declared cost when the caller opts in", async () => {
+  it("can reorder explicit fallbacksOverride by declared cost when the caller opts into routingPolicy=lowest-cost", async () => {
     const cfg = makeCfg({
       models: {
         providers: {
           openai: {
             baseUrl: "https://example.test/openai",
-            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
+            models: [makeModelDefinition("gpt-5-nano", { input: 0.2, output: 0.5 })],
           },
           anthropic: {
             baseUrl: "https://example.test/anthropic",
-            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
+            models: [makeModelDefinition("claude-sonnet-4", { input: 3, output: 9 })],
           },
         },
       },
@@ -849,7 +914,7 @@ describe("runWithModelFallback", () => {
       cfg,
       provider: "openai",
       model: "gpt-4.1-mini",
-      fallbackOrdering: "lowest-cost",
+      routingPolicy: "lowest-cost",
       fallbacksOverride: ["anthropic/claude-sonnet-4", "openai/gpt-5-nano"],
       run: async (provider, model) => {
         calls.push({ provider, model });
@@ -1592,6 +1657,54 @@ describe("runWithImageModelFallback", () => {
     expect(run.mock.calls).toEqual([
       ["openai", "gpt-image-1"],
       ["google", "gemini-2.5-flash-image-preview"],
+    ]);
+  });
+
+  it("reorders configured image fallbacks by lowest declared cost when routingPolicy=lowest-cost", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          imageModel: {
+            primary: "openai/gpt-image-1",
+            fallbacks: ["google/gemini-2.5-pro", "groq/llama-3.2-vision"],
+            routingPolicy: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          google: {
+            api: "openai-responses",
+            baseUrl: "https://example.com/google",
+            models: [makeModelDefinition("gemini-2.5-pro", { input: 1.8, output: 7.2 })],
+          },
+          groq: {
+            api: "openai-responses",
+            baseUrl: "https://example.com/groq",
+            models: [makeModelDefinition("llama-3.2-vision", { input: 0.4, output: 0.9 })],
+          },
+        },
+      },
+    });
+    const run = vi.fn().mockImplementation(async (provider: string, model: string) => {
+      if (provider === "openai" && model === "gpt-image-1") {
+        throw new Error("rate limited");
+      }
+      if (provider === "groq" && model === "llama-3.2-vision") {
+        return "ok";
+      }
+      throw new Error(`unexpected fallback candidate: ${provider}/${model}`);
+    });
+
+    const result = await runWithImageModelFallback({
+      cfg,
+      run,
+    });
+
+    expect(result.result).toBe("ok");
+    expect(run.mock.calls).toEqual([
+      ["openai", "gpt-image-1"],
+      ["groq", "llama-3.2-vision"],
     ]);
   });
 });

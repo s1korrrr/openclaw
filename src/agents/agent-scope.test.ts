@@ -9,12 +9,12 @@ import {
   resolveAgentDir,
   resolveAgentEffectiveModelPrimary,
   resolveAgentExplicitModelPrimary,
-  resolveAgentModelFallbackOrdering,
+  resolveAgentModelRoutingPolicy,
   resolveFallbackAgentId,
   resolveEffectiveModelFallbacks,
   resolveAgentModelFallbacksOverride,
   resolveAgentModelPrimary,
-  resolveRunModelFallbackOrdering,
+  resolveRunModelRoutingPolicy,
   resolveRunModelFallbacksOverride,
   resolveAgentWorkspaceDir,
   resolveAgentIdByWorkspacePath,
@@ -114,7 +114,7 @@ describe("resolveAgentConfig", () => {
           model: {
             primary: "anthropic/claude-sonnet-4",
             fallbacks: ["openai/gpt-4.1"],
-            fallbackOrdering: "lowest-cost",
+            routingPolicy: "lowest-cost",
           },
         },
         list: [
@@ -123,7 +123,7 @@ describe("resolveAgentConfig", () => {
             model: {
               primary: "anthropic/claude-opus-4",
               fallbacks: ["openai/gpt-5.2"],
-              fallbackOrdering: "configured",
+              routingPolicy: "configured",
             },
           },
         ],
@@ -134,14 +134,14 @@ describe("resolveAgentConfig", () => {
     expect(resolveAgentExplicitModelPrimary(cfg, "linus")).toBe("anthropic/claude-opus-4");
     expect(resolveAgentEffectiveModelPrimary(cfg, "linus")).toBe("anthropic/claude-opus-4");
     expect(resolveAgentModelFallbacksOverride(cfg, "linus")).toEqual(["openai/gpt-5.2"]);
-    expect(resolveAgentModelFallbackOrdering(cfg, "linus")).toBe("configured");
+    expect(resolveAgentModelRoutingPolicy(cfg, "linus")).toBe("configured");
 
     // If fallbacks isn't present, we don't override the global fallbacks.
     const cfgNoOverride: OpenClawConfig = {
       agents: {
         defaults: {
           model: {
-            fallbackOrdering: "lowest-cost",
+            routingPolicy: "lowest-cost",
           },
         },
         list: [
@@ -155,7 +155,7 @@ describe("resolveAgentConfig", () => {
       },
     };
     expect(resolveAgentModelFallbacksOverride(cfgNoOverride, "linus")).toBe(undefined);
-    expect(resolveAgentModelFallbackOrdering(cfgNoOverride, "linus")).toBe("lowest-cost");
+    expect(resolveAgentModelRoutingPolicy(cfgNoOverride, "linus")).toBe("lowest-cost");
 
     // Explicit empty list disables global fallbacks for that agent.
     const cfgDisable: OpenClawConfig = {
@@ -251,7 +251,7 @@ describe("resolveAgentConfig", () => {
         defaults: {
           model: {
             fallbacks: ["openai/gpt-4.1"],
-            fallbackOrdering: "lowest-cost",
+            routingPolicy: "lowest-cost",
           },
         },
         list: [
@@ -259,7 +259,7 @@ describe("resolveAgentConfig", () => {
             id: "support",
             model: {
               fallbacks: ["openai/gpt-5.2"],
-              fallbackOrdering: "configured",
+              routingPolicy: "configured",
             },
           },
         ],
@@ -281,14 +281,14 @@ describe("resolveAgentConfig", () => {
       }),
     ).toEqual(["openai/gpt-5.2"]);
     expect(
-      resolveRunModelFallbackOrdering({
+      resolveRunModelRoutingPolicy({
         cfg,
         agentId: "support",
         sessionKey: "agent:main:session",
       }),
     ).toBe("configured");
     expect(
-      resolveRunModelFallbackOrdering({
+      resolveRunModelRoutingPolicy({
         cfg,
         agentId: "main",
         sessionKey: "agent:main:session",

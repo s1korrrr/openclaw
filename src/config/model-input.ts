@@ -1,9 +1,9 @@
-import type { AgentModelConfig, AgentModelFallbackOrdering } from "./types.agents-shared.js";
+import type { AgentModelConfig, AgentModelRoutingPolicy } from "./types.agents-shared.js";
 
 type AgentModelListLike = {
   primary?: string;
   fallbacks?: string[];
-  fallbackOrdering?: AgentModelFallbackOrdering;
+  routingPolicy?: AgentModelRoutingPolicy;
 };
 
 export function resolveAgentModelPrimaryValue(model?: AgentModelConfig): string | undefined {
@@ -25,15 +25,13 @@ export function resolveAgentModelFallbackValues(model?: AgentModelConfig): strin
   return Array.isArray(model.fallbacks) ? model.fallbacks : [];
 }
 
-export function resolveAgentModelFallbackOrderingValue(
+export function resolveAgentModelRoutingPolicy(
   model?: AgentModelConfig,
-): AgentModelFallbackOrdering | undefined {
+): AgentModelRoutingPolicy | undefined {
   if (!model || typeof model !== "object") {
     return undefined;
   }
-  return model.fallbackOrdering === "configured" || model.fallbackOrdering === "lowest-cost"
-    ? model.fallbackOrdering
-    : undefined;
+  return model.routingPolicy;
 }
 
 export function toAgentModelListLike(model?: AgentModelConfig): AgentModelListLike | undefined {

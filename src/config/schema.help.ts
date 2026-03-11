@@ -1014,14 +1014,18 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.model.primary": "Primary model (provider/model).",
   "agents.defaults.model.fallbacks":
     "Ordered fallback models (provider/model). Used when the primary model fails.",
-  "agents.defaults.model.fallbackOrdering":
-    'Fallback ordering policy for the configured model chain. Keep "configured" to preserve the listed order, or opt into "lowest-cost" to sort configured fallbacks by declared model cost while keeping the requested model first.',
+  "agents.defaults.model.routingPolicy":
+    'Optional routing policy for the configured text-model chain. Keep "configured" (default behavior) to preserve the listed order, or set "lowest-cost" to try cheaper declared fallbacks first after the current model fails.',
   "agents.defaults.imageModel.primary":
     "Optional image model (provider/model) used when the primary model lacks image input.",
   "agents.defaults.imageModel.fallbacks": "Ordered fallback image models (provider/model).",
+  "agents.defaults.imageModel.routingPolicy":
+    'Optional routing policy for the configured image-model chain. Keep "configured" (default behavior) to preserve the listed order, or set "lowest-cost" to try cheaper declared fallbacks first after the current model fails.',
   "agents.defaults.pdfModel.primary":
     "Optional PDF model (provider/model) for the PDF analysis tool. Defaults to imageModel, then session model.",
   "agents.defaults.pdfModel.fallbacks": "Ordered fallback PDF models (provider/model).",
+  "agents.defaults.pdfModel.routingPolicy":
+    'Optional routing policy for the configured PDF-model chain. Keep "configured" (default behavior) to preserve the listed order, or set "lowest-cost" to try cheaper declared fallbacks first after the current model fails.',
   "agents.defaults.pdfMaxBytesMb":
     "Maximum PDF file size in megabytes for the PDF tool (default: 10).",
   "agents.defaults.pdfMaxPages":

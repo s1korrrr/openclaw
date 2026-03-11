@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import {
-  resolveRunModelFallbackOrdering,
+  resolveRunModelRoutingPolicy,
   resolveRunModelFallbacksOverride,
 } from "../../agents/agent-scope.js";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
@@ -164,7 +164,7 @@ export function createFollowupRunner(params: {
           model: queued.run.model,
           runId,
           agentDir: queued.run.agentDir,
-          fallbackOrdering: resolveRunModelFallbackOrdering({
+          routingPolicy: resolveRunModelRoutingPolicy({
             cfg: queued.run.config,
             agentId: queued.run.agentId,
             sessionKey: queued.run.sessionKey,

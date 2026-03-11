@@ -5,7 +5,7 @@ import type {
   SandboxPruneSettings,
 } from "./types.sandbox.js";
 
-export type AgentModelFallbackOrdering = "configured" | "lowest-cost";
+export type AgentModelRoutingPolicy = "configured" | "lowest-cost";
 
 export type AgentModelConfig =
   | string
@@ -14,8 +14,8 @@ export type AgentModelConfig =
       primary?: string;
       /** Per-agent model fallbacks (provider/model). */
       fallbacks?: string[];
-      /** Fallback ordering policy. */
-      fallbackOrdering?: AgentModelFallbackOrdering;
+      /** Optional routing policy for the configured model chain. */
+      routingPolicy?: AgentModelRoutingPolicy;
     };
 
 export type AgentSandboxConfig = {
