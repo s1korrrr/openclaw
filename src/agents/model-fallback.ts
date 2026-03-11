@@ -2,9 +2,11 @@ import type { OpenClawConfig } from "../config/config.js";
 import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
+  resolveAgentModelRoutingPolicy,
 } from "../config/model-input.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
+import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import {
   ensureAuthProfileStore,
   getSoonestCooldownExpiry,
@@ -24,6 +26,7 @@ import type { FallbackAttempt, ModelCandidate } from "./model-fallback.types.js"
 import {
   buildConfiguredAllowlistKeys,
   buildModelAliasIndex,
+  findNormalizedProviderValue,
   modelKey,
   normalizeModelRef,
   resolveConfiguredModelRef,
@@ -31,6 +34,7 @@ import {
 } from "./model-selection.js";
 import type { FailoverReason } from "./pi-embedded-helpers.js";
 import { isLikelyContextOverflowError } from "./pi-embedded-helpers.js";
+import { discoverAuthStorage, discoverModels } from "./pi-model-discovery.js";
 
 const log = createSubsystemLogger("model-fallback");
 
@@ -326,6 +330,113 @@ function resolveFallbackCandidates(params: {
   return candidates;
 }
 
+type ModelCostShape = {
+  cost?: Partial<Record<"input" | "output" | "cacheRead" | "cacheWrite", unknown>>;
+};
+
+function resolveDeclaredModelCostTotal(model: ModelCostShape | null | undefined): number | null {
+  if (!model?.cost || typeof model.cost !== "object") {
+    return null;
+  }
+
+  let total = 0;
+  let sawFiniteValue = false;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
+    const value = model.cost[key];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      continue;
+    }
+    total += value;
+    sawFiniteValue = true;
+  }
+
+  return sawFiniteValue ? total : null;
+}
+
+function resolveConfiguredCandidateCost(params: {
+  cfg: OpenClawConfig | undefined;
+  candidate: ModelCandidate;
+}): number | null {
+  const providerConfig = findNormalizedProviderValue(
+    params.cfg?.models?.providers,
+    params.candidate.provider,
+  );
+  const configuredModel = providerConfig?.models?.find(
+    (entry) => entry.id === params.candidate.model,
+  );
+  return resolveDeclaredModelCostTotal(configuredModel);
+}
+
+function resolveRegistryCandidateCost(params: {
+  modelRegistry: ReturnType<typeof discoverModels>;
+  candidate: ModelCandidate;
+}): number | null {
+  const discoveredModel = params.modelRegistry.find(
+    params.candidate.provider,
+    params.candidate.model,
+  ) as ModelCostShape | null;
+  return resolveDeclaredModelCostTotal(discoveredModel);
+}
+
+function orderCandidatesByDeclaredCost(params: {
+  candidates: ModelCandidate[];
+  policy: ReturnType<typeof resolveAgentModelRoutingPolicy>;
+  cfg: OpenClawConfig | undefined;
+  agentDir?: string;
+  preserveFirstCandidate?: boolean;
+}): ModelCandidate[] {
+  if (params.policy !== "lowest-cost") {
+    return params.candidates;
+  }
+
+  const leadingCount = params.preserveFirstCandidate === false ? 0 : 1;
+  if (params.candidates.length <= leadingCount + 1) {
+    return params.candidates;
+  }
+
+  const leading = params.candidates.slice(0, leadingCount);
+  let modelRegistry: ReturnType<typeof discoverModels> | undefined;
+  const reorderedTail = params.candidates
+    .slice(leadingCount)
+    .map((candidate, originalIndex) => ({
+      candidate,
+      originalIndex,
+      totalCost: (() => {
+        const configuredCost = resolveConfiguredCandidateCost({
+          cfg: params.cfg,
+          candidate,
+        });
+        if (configuredCost !== null) {
+          return configuredCost;
+        }
+        if (!modelRegistry) {
+          const resolvedAgentDir = params.agentDir ?? resolveOpenClawAgentDir();
+          const authStorage = discoverAuthStorage(resolvedAgentDir);
+          modelRegistry = discoverModels(authStorage, resolvedAgentDir);
+        }
+        return resolveRegistryCandidateCost({
+          modelRegistry,
+          candidate,
+        });
+      })(),
+    }))
+    .toSorted((left, right) => {
+      if (left.totalCost === null && right.totalCost === null) {
+        return left.originalIndex - right.originalIndex;
+      }
+      if (left.totalCost === null) {
+        return 1;
+      }
+      if (right.totalCost === null) {
+        return -1;
+      }
+      return left.totalCost - right.totalCost || left.originalIndex - right.originalIndex;
+    })
+    .map((entry) => entry.candidate);
+
+  return [...leading, ...reorderedTail];
+}
+
 const lastProbeAttempt = new Map<string, number>();
 const MIN_PROBE_INTERVAL_MS = 30_000; // 30 seconds between probes per key
 const PROBE_MARGIN_MS = 2 * 60 * 1000;
@@ -510,11 +621,20 @@ export async function runWithModelFallback<T>(params: {
   run: ModelFallbackRunFn<T>;
   onError?: ModelFallbackErrorHandler;
 }): Promise<ModelFallbackRunResult<T>> {
-  const candidates = resolveFallbackCandidates({
+  const candidates = orderCandidatesByDeclaredCost({
+    candidates: resolveFallbackCandidates({
+      cfg: params.cfg,
+      provider: params.provider,
+      model: params.model,
+      fallbacksOverride: params.fallbacksOverride,
+    }),
     cfg: params.cfg,
-    provider: params.provider,
-    model: params.model,
-    fallbacksOverride: params.fallbacksOverride,
+    agentDir: params.agentDir,
+    preserveFirstCandidate: true,
+    policy:
+      params.fallbacksOverride === undefined
+        ? resolveAgentModelRoutingPolicy(params.cfg?.agents?.defaults?.model)
+        : undefined,
   });
   const authStore = params.cfg
     ? ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false })
@@ -768,10 +888,15 @@ export async function runWithImageModelFallback<T>(params: {
   run: (provider: string, model: string) => Promise<T>;
   onError?: ModelFallbackErrorHandler;
 }): Promise<ModelFallbackRunResult<T>> {
-  const candidates = resolveImageFallbackCandidates({
+  const candidates = orderCandidatesByDeclaredCost({
+    candidates: resolveImageFallbackCandidates({
+      cfg: params.cfg,
+      defaultProvider: DEFAULT_PROVIDER,
+      modelOverride: params.modelOverride,
+    }),
     cfg: params.cfg,
-    defaultProvider: DEFAULT_PROVIDER,
-    modelOverride: params.modelOverride,
+    preserveFirstCandidate: true,
+    policy: resolveAgentModelRoutingPolicy(params.cfg?.agents?.defaults?.imageModel),
   });
   if (candidates.length === 0) {
     throw new Error(
