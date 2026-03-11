@@ -173,7 +173,8 @@ export type DiagnosticAgentLoopSpanEvent = DiagnosticBaseEvent & {
     | "assistant_error"
     | "prompt_error"
     | "timeout"
-    | "client_tool_call";
+    | "client_tool_call"
+    | "evaluation_result";
   usage?: {
     input?: number;
     output?: number;

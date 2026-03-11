@@ -72,6 +72,7 @@ import { runEmbeddedAttempt } from "./run/attempt.js";
 import { createFailoverDecisionLogger } from "./run/failover-observation.js";
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
+import { buildEmbeddedPiSelfCalibrationMeta } from "./self-calibration.js";
 import {
   truncateOversizedToolResultsInSession,
   sessionLikelyHasOversizedToolResults,
@@ -798,6 +799,51 @@ export async function runEmbeddedPiAgent(
         const withPlanSearch = planSearchMeta ? { ...meta, planSearch: planSearchMeta } : meta;
         return brainsMeta ? { ...withPlanSearch, brains: brainsMeta } : withPlanSearch;
       };
+      const finalizeRunResult = <T extends EmbeddedPiRunResult & { meta: EmbeddedPiRunMeta }>(
+        result: T,
+      ): T => {
+        const selfCalibration = buildEmbeddedPiSelfCalibrationMeta({
+          planSearch: planSearchMeta,
+          runMeta: result.meta,
+          payloadCount: result.payloads?.length ?? 0,
+          didSendViaMessagingTool: result.didSendViaMessagingTool ?? false,
+        });
+        if (!selfCalibration) {
+          return result;
+        }
+        const now = Date.now();
+        agentLoopTrace?.recordSpan({
+          stage: "observation",
+          status:
+            selfCalibration.realized.outcome === "failed"
+              ? "failed"
+              : selfCalibration.realized.outcome === "partial"
+                ? "aborted"
+                : "completed",
+          startedAtMs: now,
+          endedAtMs: now,
+          reason: "self_calibration",
+          observationKind: "evaluation_result",
+          failureReason: selfCalibration.realized.errorKind,
+          stopReason: selfCalibration.realized.stopReason,
+          details: {
+            heuristic: selfCalibration.heuristic,
+            selectedCandidateId: selfCalibration.predicted.selectedCandidateId,
+            predictedConfidence: selfCalibration.predicted.normalizedConfidence,
+            realizedOutcome: selfCalibration.realized.outcome,
+            realizedOutcomeScore: selfCalibration.realized.outcomeScore,
+            confidenceDelta: selfCalibration.delta.confidenceDelta,
+            verdict: selfCalibration.delta.verdict,
+          },
+        });
+        return {
+          ...result,
+          meta: {
+            ...result.meta,
+            selfCalibration,
+          },
+        };
+      };
 
       if (planSearchResult && params.onAgentEvent) {
         params.onAgentEvent({
@@ -920,7 +966,7 @@ export async function runEmbeddedPiAgent(
                 `provider=${provider}/${modelId} attempts=${runLoopIterations} ` +
                 `maxAttempts=${MAX_RUN_LOOP_ITERATIONS}`,
             );
-            return {
+            return finalizeRunResult({
               payloads: [
                 {
                   text:
@@ -941,7 +987,7 @@ export async function runEmbeddedPiAgent(
                 }),
                 error: { kind: "retry_limit", message },
               }),
-            };
+            });
           }
           runLoopIterations += 1;
           const copilotAuthRetry = authRetryPending;
@@ -1284,7 +1330,7 @@ export async function runEmbeddedPiAgent(
               );
             }
             const kind = isCompactionFailure ? "compaction_failure" : "context_overflow";
-            return {
+            return finalizeRunResult({
               payloads: [
                 {
                   text:
@@ -1307,7 +1353,7 @@ export async function runEmbeddedPiAgent(
                 systemPromptReport: attempt.systemPromptReport,
                 error: { kind, message: errorText },
               }),
-            };
+            });
           }
 
           if (promptError && !aborted) {
@@ -1319,7 +1365,7 @@ export async function runEmbeddedPiAgent(
             }
             // Handle role ordering errors with a user-friendly message
             if (/incorrect role information|roles must alternate/i.test(errorText)) {
-              return {
+              return finalizeRunResult({
                 payloads: [
                   {
                     text:
@@ -1342,7 +1388,7 @@ export async function runEmbeddedPiAgent(
                   systemPromptReport: attempt.systemPromptReport,
                   error: { kind: "role_ordering", message: errorText },
                 }),
-              };
+              });
             }
             // Handle image size errors with a user-friendly message (no retry needed)
             const imageSizeError = parseImageSizeError(errorText);
@@ -1351,7 +1397,7 @@ export async function runEmbeddedPiAgent(
               const maxMbLabel =
                 typeof maxMb === "number" && Number.isFinite(maxMb) ? `${maxMb}` : null;
               const maxBytesHint = maxMbLabel ? ` (max ${maxMbLabel}MB)` : "";
-              return {
+              return finalizeRunResult({
                 payloads: [
                   {
                     text:
@@ -1374,7 +1420,7 @@ export async function runEmbeddedPiAgent(
                   systemPromptReport: attempt.systemPromptReport,
                   error: { kind: "image_size", message: errorText },
                 }),
-              };
+              });
             }
             const promptFailoverReason = classifyFailoverReason(errorText);
             const promptProfileFailureReason =
@@ -1625,7 +1671,7 @@ export async function runEmbeddedPiAgent(
           // Emit an explicit timeout error instead of silently completing, so
           // callers do not lose the turn as an orphaned user message.
           if (timedOut && !timedOutDuringCompaction && payloads.length === 0) {
-            return {
+            return finalizeRunResult({
               payloads: [
                 {
                   text:
@@ -1646,7 +1692,7 @@ export async function runEmbeddedPiAgent(
               messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
               messagingToolSentTargets: attempt.messagingToolSentTargets,
               successfulCronAdds: attempt.successfulCronAdds,
-            };
+            });
           }
 
           log.debug(
@@ -1665,7 +1711,7 @@ export async function runEmbeddedPiAgent(
               agentDir: params.agentDir,
             });
           }
-          return {
+          return finalizeRunResult({
             payloads: payloads.length ? payloads : undefined,
             meta: withRuntimeMeta({
               durationMs: Date.now() - started,
@@ -1694,7 +1740,7 @@ export async function runEmbeddedPiAgent(
             messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
             messagingToolSentTargets: attempt.messagingToolSentTargets,
             successfulCronAdds: attempt.successfulCronAdds,
-          };
+          });
         }
       } finally {
         clearAgentLoopTrace(params.runId);
