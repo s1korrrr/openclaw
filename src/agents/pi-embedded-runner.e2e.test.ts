@@ -416,6 +416,8 @@ describe("runEmbeddedPiAgent", () => {
     });
 
     expect(result.meta.selfCalibration?.delta.verdict).toBeTruthy();
+    expect(result.meta.temporalCredit?.heuristic).toBe("evaluation_trace_ablation_v1");
+    expect(result.meta.temporalCredit?.topPositiveFactorId).toBeTruthy();
 
     const timeline = await waitForTimelineObservation(traceFilePath, runId, "evaluation_result");
     const evaluationEntry = timeline.find((entry) => entry.observationKind === "evaluation_result");
@@ -424,6 +426,8 @@ describe("runEmbeddedPiAgent", () => {
       heuristic: "plan_search_vs_terminal_run_v1",
       selectedCandidateId: result.meta.planSearch?.selectedCandidateId,
       verdict: result.meta.selfCalibration?.delta.verdict,
+      temporalCreditHeuristic: "evaluation_trace_ablation_v1",
+      temporalCreditTopPositiveFactorId: result.meta.temporalCredit?.topPositiveFactorId,
     });
   });
 

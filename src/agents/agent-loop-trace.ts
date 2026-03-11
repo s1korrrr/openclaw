@@ -122,6 +122,7 @@ export type AgentLoopTrace = {
   startSpan: (params: AgentLoopTraceStart) => string;
   finishSpan: (stepId: string, params: AgentLoopTraceFinish) => AgentLoopTraceSpan | null;
   recordSpan: (params: AgentLoopTraceStart & AgentLoopTraceFinish) => AgentLoopTraceSpan;
+  snapshotSpans: () => AgentLoopTraceSpan[];
   getCurrentReplanStepId: () => string | undefined;
   getLastReplanStepId: () => string | undefined;
 };
@@ -138,6 +139,7 @@ export function createAgentLoopTrace(params: AgentLoopTraceInit): AgentLoopTrace
   let currentReplanStepId: string | undefined;
   let lastReplanStepId: string | undefined;
   const activeSpans = new Map<string, ActiveSpan>();
+  const recordedSpans: AgentLoopTraceSpan[] = [];
   const base = buildAgentTraceBase(params);
 
   const writeSpan = (span: Omit<AgentLoopTraceSpan, "ts" | "seq" | "type">): AgentLoopTraceSpan => {
@@ -152,6 +154,7 @@ export function createAgentLoopTrace(params: AgentLoopTraceInit): AgentLoopTrace
     if (line) {
       writer.write(`${line}\n`);
     }
+    recordedSpans.push(event);
     emitDiagnosticEvent({
       type: "agent.loop.span",
       runId: event.runId ?? "",
@@ -290,6 +293,7 @@ export function createAgentLoopTrace(params: AgentLoopTraceInit): AgentLoopTrace
     startSpan,
     finishSpan,
     recordSpan,
+    snapshotSpans: () => recordedSpans.slice(),
     getCurrentReplanStepId: () => currentReplanStepId,
     getLastReplanStepId: () => lastReplanStepId,
   };

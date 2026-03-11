@@ -73,6 +73,7 @@ import { createFailoverDecisionLogger } from "./run/failover-observation.js";
 import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
 import { buildEmbeddedPiSelfCalibrationMeta } from "./self-calibration.js";
+import { buildEmbeddedPiTemporalCreditMeta } from "./temporal-credit.js";
 import {
   truncateOversizedToolResultsInSession,
   sessionLikelyHasOversizedToolResults,
@@ -808,39 +809,60 @@ export async function runEmbeddedPiAgent(
           payloadCount: result.payloads?.length ?? 0,
           didSendViaMessagingTool: result.didSendViaMessagingTool ?? false,
         });
-        if (!selfCalibration) {
+        const resultMeta: EmbeddedPiRunMeta = selfCalibration
+          ? {
+              ...result.meta,
+              selfCalibration,
+            }
+          : result.meta;
+        const temporalCredit = buildEmbeddedPiTemporalCreditMeta({
+          planSearch: planSearchMeta,
+          runMeta: resultMeta,
+          payloadCount: result.payloads?.length ?? 0,
+          didSendViaMessagingTool: result.didSendViaMessagingTool ?? false,
+          successfulCronAdds: result.successfulCronAdds,
+          traceSpans: agentLoopTrace?.snapshotSpans() ?? [],
+        });
+        if (!selfCalibration && !temporalCredit) {
           return result;
         }
         const now = Date.now();
+        const observedOutcome =
+          temporalCredit?.observedOutcome ?? selfCalibration?.realized.outcome;
         agentLoopTrace?.recordSpan({
           stage: "observation",
           status:
-            selfCalibration.realized.outcome === "failed"
+            observedOutcome === "failed"
               ? "failed"
-              : selfCalibration.realized.outcome === "partial"
+              : observedOutcome === "partial"
                 ? "aborted"
                 : "completed",
           startedAtMs: now,
           endedAtMs: now,
-          reason: "self_calibration",
+          reason: temporalCredit ? "temporal_credit" : "self_calibration",
           observationKind: "evaluation_result",
-          failureReason: selfCalibration.realized.errorKind,
-          stopReason: selfCalibration.realized.stopReason,
+          failureReason: selfCalibration?.realized.errorKind ?? resultMeta.error?.kind,
+          stopReason: selfCalibration?.realized.stopReason ?? resultMeta.stopReason,
           details: {
-            heuristic: selfCalibration.heuristic,
-            selectedCandidateId: selfCalibration.predicted.selectedCandidateId,
-            predictedConfidence: selfCalibration.predicted.normalizedConfidence,
-            realizedOutcome: selfCalibration.realized.outcome,
-            realizedOutcomeScore: selfCalibration.realized.outcomeScore,
-            confidenceDelta: selfCalibration.delta.confidenceDelta,
-            verdict: selfCalibration.delta.verdict,
+            heuristic: selfCalibration?.heuristic,
+            selectedCandidateId: selfCalibration?.predicted.selectedCandidateId,
+            predictedConfidence: selfCalibration?.predicted.normalizedConfidence,
+            realizedOutcome: selfCalibration?.realized.outcome ?? temporalCredit?.observedOutcome,
+            realizedOutcomeScore:
+              selfCalibration?.realized.outcomeScore ?? temporalCredit?.observedOutcomeScore,
+            confidenceDelta: selfCalibration?.delta.confidenceDelta,
+            verdict: selfCalibration?.delta.verdict,
+            temporalCreditHeuristic: temporalCredit?.heuristic,
+            temporalCreditFactorCount: temporalCredit?.factors.length,
+            temporalCreditTopPositiveFactorId: temporalCredit?.topPositiveFactorId,
+            temporalCreditTopNegativeFactorId: temporalCredit?.topNegativeFactorId,
           },
         });
         return {
           ...result,
           meta: {
-            ...result.meta,
-            selfCalibration,
+            ...resultMeta,
+            temporalCredit,
           },
         };
       };

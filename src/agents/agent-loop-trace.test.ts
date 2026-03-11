@@ -91,6 +91,7 @@ describe("agent-loop trace", () => {
     stop();
 
     expect(lines).toHaveLength(2);
+    expect(trace?.snapshotSpans()).toHaveLength(2);
     const replan = JSON.parse(lines[0] ?? "{}") as {
       stage?: string;
       status?: string;
@@ -106,6 +107,7 @@ describe("agent-loop trace", () => {
     expect(observation.stage).toBe("observation");
     expect(observation.parentStepId).toBe(replan.stepId);
     expect(observation.observationKind).toBe("assistant_response");
+    expect(trace?.snapshotSpans()[1]?.observationKind).toBe("assistant_response");
 
     expect(events).toHaveLength(2);
     expect(events[0]?.stage).toBe("replan");
