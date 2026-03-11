@@ -1,4 +1,5 @@
 import type { ChatType } from "../channels/chat-type.js";
+import type { ExecApprovalRiskConfig } from "../infra/exec-approvals.js";
 import type { SafeBinProfileFixture } from "../infra/exec-safe-bin-policy.js";
 import type { AgentElevatedAllowFromConfig, SessionSendPolicyAction } from "./types.base.js";
 import type { SecretInput } from "./types.secrets.js";
@@ -248,6 +249,8 @@ export type ExecToolConfig = {
   timeoutSec?: number;
   /** Emit a running notice (ms) when approval-backed exec runs long (default: 10000, 0 = off). */
   approvalRunningNoticeMs?: number;
+  /** Risk-tier escalation policy for forcing exec approval on higher-risk requests. */
+  approvalRisk?: ExecApprovalRiskConfig;
   /** How long to keep finished sessions in memory (ms). */
   cleanupMs?: number;
   /** Emit a system event and heartbeat when a backgrounded exec exits. */

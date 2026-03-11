@@ -415,6 +415,8 @@ export function createExecTool(
           agentId,
           security,
           ask,
+          approvalRisk: defaults?.approvalRisk,
+          elevatedRequested,
           timeoutSec: params.timeout,
           defaultTimeoutSec,
           approvalRunningNoticeMs,
@@ -424,7 +426,7 @@ export function createExecTool(
         });
       }
 
-      if (host === "gateway" && !bypassApprovals) {
+      if (host === "gateway") {
         const gatewayResult = await processGatewayAllowlist({
           command: params.command,
           workdir,
@@ -434,6 +436,8 @@ export function createExecTool(
           defaultTimeoutSec,
           security,
           ask,
+          approvalRisk: defaults?.approvalRisk,
+          elevatedRequested,
           safeBins,
           safeBinProfiles,
           agentId,

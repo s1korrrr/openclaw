@@ -89,11 +89,16 @@ const ExecApprovalRiskTierSchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
+  Type.Literal("critical"),
 ]);
 
 const ExecApprovalRiskReasonSchema = Type.Union([
+  Type.Literal("gateway-host"),
   Type.Literal("node-host"),
+  Type.Literal("full-access"),
   Type.Literal("full-security"),
+  Type.Literal("elevated-mode"),
+  Type.Literal("allowlist-heredoc"),
   Type.Literal("mutable-file-operand"),
   Type.Literal("obfuscated-command"),
 ]);

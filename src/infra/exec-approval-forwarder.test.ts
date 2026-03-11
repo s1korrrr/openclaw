@@ -256,6 +256,11 @@ describe("exec approval forwarder", () => {
           ...baseRequest.request,
           turnSourceChannel: "discord",
           turnSourceTo: "channel:123",
+          risk: {
+            tier: "high",
+            reasons: ["gateway-host", "full-security"],
+            checkpointThreshold: "high",
+          },
         },
       }),
     ).resolves.toBe(true);
@@ -267,6 +272,9 @@ describe("exec approval forwarder", () => {
         to: "123",
         payloads: [
           expect.objectContaining({
+            text: expect.stringContaining(
+              "Risk: high (checkpoint >= high; gateway host, full security)",
+            ),
             channelData: {
               execApproval: expect.objectContaining({
                 approvalId: "req-1",
@@ -285,6 +293,29 @@ describe("exec approval forwarder", () => {
         ],
       }),
     );
+  });
+
+  it("includes risk metadata in forwarded text approvals", async () => {
+    vi.useFakeTimers();
+    const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
+
+    await expect(
+      forwarder.handleRequested({
+        ...baseRequest,
+        request: {
+          ...baseRequest.request,
+          risk: {
+            tier: "high",
+            reasons: ["gateway-host", "full-security"],
+            checkpointThreshold: "high",
+          },
+        },
+      }),
+    ).resolves.toBe(true);
+    await Promise.resolve();
+
+    const text = getFirstDeliveryText(deliver);
+    expect(text).toContain("Risk: high (checkpoint >= high; gateway host, full security)");
   });
 
   it("formats single-line commands as inline code", async () => {

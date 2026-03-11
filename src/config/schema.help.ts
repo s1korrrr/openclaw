@@ -314,6 +314,24 @@ export const FIELD_HELP: Record<string, string> = {
     "Approval strategy for when exec commands require human confirmation before running. Use stricter ask behavior in shared channels and lower-friction settings in private operator contexts.",
   "tools.exec.node":
     "Node binding configuration for exec tooling when command execution is delegated through connected nodes. Use explicit node binding only when multi-node routing is required.",
+  "tools.exec.approvalRisk":
+    "Risk-tier escalation policy for exec approvals. Use this to force human approval once a request’s computed risk tier crosses a configured threshold, even when ask=off would otherwise auto-run.",
+  "tools.exec.approvalRisk.forceApprovalAtOrAbove":
+    "Forces exec approval once the computed tier is at or above this threshold (`low`, `medium`, `high`, or `critical`). Leave unset to keep risk-tier metadata audit-only.",
+  "tools.exec.approvalRisk.tiers":
+    "Optional overrides for the default exec risk-tier mapping. Use these only when your deployment needs stricter or looser tier classification for specific exec characteristics.",
+  "tools.exec.approvalRisk.tiers.gateway":
+    "Base risk tier for gateway-host exec requests (default: low). Raise this when local host execution should require more frequent human review.",
+  "tools.exec.approvalRisk.tiers.node":
+    "Base risk tier for node-host exec requests (default: high). Lower only if your node fleet is tightly controlled and approval friction is intentionally reduced.",
+  "tools.exec.approvalRisk.tiers.fullAccess":
+    "Risk tier applied when exec runs with full host access (default: high). Keep high or critical unless fully trusted operator automation should bypass review.",
+  "tools.exec.approvalRisk.tiers.elevated":
+    "Risk tier applied when the elevated exec path is used (default: high). Keep elevated requests above normal gateway runs so audits show privileged execution clearly.",
+  "tools.exec.approvalRisk.tiers.obfuscated":
+    "Risk tier applied when command obfuscation detectors fire (default: critical). Lowering this is usually a bad idea because obscured commands are hard to audit safely.",
+  "tools.exec.approvalRisk.tiers.heredoc":
+    "Risk tier applied when allowlist-mode gateway exec contains heredoc segments (default: medium). Raise it if inline script bodies should trigger more explicit review.",
   "tools.agentToAgent":
     "Policy for allowing agent-to-agent tool calls and constraining which target agents can be reached. Keep disabled or tightly scoped unless cross-agent orchestration is intentionally enabled.",
   "tools.agentToAgent.enabled":

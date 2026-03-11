@@ -11,6 +11,19 @@ export * from "./exec-approvals-allowlist.js";
 export type ExecHost = "sandbox" | "gateway" | "node";
 export type ExecSecurity = "deny" | "allowlist" | "full";
 export type ExecAsk = "off" | "on-miss" | "always";
+export type ExecApprovalRiskTier = "low" | "medium" | "high" | "critical";
+
+export type ExecApprovalRiskConfig = {
+  forceApprovalAtOrAbove?: ExecApprovalRiskTier;
+  tiers?: {
+    gateway?: ExecApprovalRiskTier;
+    node?: ExecApprovalRiskTier;
+    fullAccess?: ExecApprovalRiskTier;
+    elevated?: ExecApprovalRiskTier;
+    obfuscated?: ExecApprovalRiskTier;
+    heredoc?: ExecApprovalRiskTier;
+  };
+};
 
 export function normalizeExecHost(value?: string | null): ExecHost | null {
   const normalized = value?.trim().toLowerCase();
@@ -34,6 +47,40 @@ export function normalizeExecAsk(value?: string | null): ExecAsk | null {
     return normalized;
   }
   return null;
+}
+
+export function normalizeExecApprovalRiskTier(value?: string | null): ExecApprovalRiskTier | null {
+  const normalized = value?.trim().toLowerCase();
+  if (
+    normalized === "low" ||
+    normalized === "medium" ||
+    normalized === "high" ||
+    normalized === "critical"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+const EXEC_APPROVAL_RISK_ORDER: Record<ExecApprovalRiskTier, number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3,
+};
+
+export function maxExecApprovalRiskTier(
+  left: ExecApprovalRiskTier,
+  right: ExecApprovalRiskTier,
+): ExecApprovalRiskTier {
+  return EXEC_APPROVAL_RISK_ORDER[left] >= EXEC_APPROVAL_RISK_ORDER[right] ? left : right;
+}
+
+export function isExecApprovalRiskTierAtOrAbove(
+  tier: ExecApprovalRiskTier,
+  threshold: ExecApprovalRiskTier,
+): boolean {
+  return EXEC_APPROVAL_RISK_ORDER[tier] >= EXEC_APPROVAL_RISK_ORDER[threshold];
 }
 
 export type SystemRunApprovalBinding = {

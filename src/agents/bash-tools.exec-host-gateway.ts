@@ -3,6 +3,7 @@ import { loadConfig } from "../config/config.js";
 import { buildExecApprovalUnavailableReplyPayload } from "../infra/exec-approval-reply.js";
 import {
   classifyExecApprovalRisk,
+  minExecApprovalRiskTier,
   resolveExecApprovalCheckpointThreshold,
   shouldRequireExecApprovalCheckpoint,
   withExecApprovalCheckpointMetadata,
@@ -12,11 +13,13 @@ import {
   resolveExecApprovalInitiatingSurfaceState,
 } from "../infra/exec-approval-surface.js";
 import {
+  type ExecApprovalRiskConfig,
   addAllowlistEntry,
   type ExecAsk,
   type ExecSecurity,
   buildEnforcedShellCommand,
   evaluateShellAllowlist,
+  maxExecApprovalRiskTier,
   recordAllowlistUse,
   requiresExecApproval,
   resolveAllowAlwaysPatterns,
@@ -33,6 +36,7 @@ import {
 } from "./bash-tools.exec-approval-request.js";
 import {
   createDefaultExecApprovalRequestContext,
+  resolveExecApprovalRiskContext,
   resolveBaseExecApprovalDecision,
   resolveApprovalDecisionOrUndefined,
   resolveExecHostApprovalContext,
@@ -55,6 +59,8 @@ export type ProcessGatewayAllowlistParams = {
   defaultTimeoutSec: number;
   security: ExecSecurity;
   ask: ExecAsk;
+  approvalRisk?: ExecApprovalRiskConfig;
+  elevatedRequested?: boolean;
   safeBins: Set<string>;
   safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
   agentId?: string;
@@ -126,13 +132,38 @@ export async function processGatewayAllowlist(
     security: hostSecurity,
     obfuscationDetected: obfuscation.detected,
   });
+  const hasHeredocSegment = allowlistEval.segments.some((segment) =>
+    segment.argv.some((token) => token.startsWith("<<")),
+  );
+  const requiresHeredocApproval =
+    hostSecurity === "allowlist" && analysisOk && allowlistSatisfied && hasHeredocSegment;
+  const configuredApprovalRisk = params.approvalRisk
+    ? resolveExecApprovalRiskContext({
+        config: params.approvalRisk,
+        host: "gateway",
+        security: hostSecurity,
+        elevatedRequested: params.elevatedRequested,
+        obfuscationDetected: obfuscation.detected,
+        heredocDetected: requiresHeredocApproval,
+      })
+    : null;
+  const effectiveCheckpointThreshold =
+    configuredApprovalRisk?.threshold && checkpointThreshold
+      ? minExecApprovalRiskTier(configuredApprovalRisk.threshold, checkpointThreshold)
+      : configuredApprovalRisk?.threshold ?? checkpointThreshold;
+  const combinedRisk = configuredApprovalRisk
+    ? {
+        tier: maxExecApprovalRiskTier(baseRisk.tier, configuredApprovalRisk.tier),
+        reasons: Array.from(new Set([...baseRisk.reasons, ...configuredApprovalRisk.reasons])),
+      }
+    : baseRisk;
   const requiresCheckpointApproval = shouldRequireExecApprovalCheckpoint({
-    risk: baseRisk,
-    checkpointThreshold,
+    risk: combinedRisk,
+    checkpointThreshold: effectiveCheckpointThreshold,
   });
   const risk = withExecApprovalCheckpointMetadata({
-    risk: baseRisk,
-    checkpointThreshold,
+    risk: combinedRisk,
+    checkpointThreshold: effectiveCheckpointThreshold,
   });
   const recordMatchedAllowlistUse = (resolvedPath?: string) => {
     if (allowlistMatches.length === 0) {
@@ -147,11 +178,6 @@ export async function processGatewayAllowlist(
       recordAllowlistUse(approvals.file, params.agentId, match, params.command, resolvedPath);
     }
   };
-  const hasHeredocSegment = allowlistEval.segments.some((segment) =>
-    segment.argv.some((token) => token.startsWith("<<")),
-  );
-  const requiresHeredocApproval =
-    hostSecurity === "allowlist" && analysisOk && allowlistSatisfied && hasHeredocSegment;
   const requiresAsk =
     requiresExecApproval({
       ask: hostAsk,
@@ -356,6 +382,7 @@ export async function processGatewayAllowlist(
                     reason: unavailableReason,
                     channelLabel: initiatingSurface.channelLabel,
                     sentApproverDms,
+                    risk,
                   }).text ?? "")
                 : buildApprovalPendingMessage({
                     warningText,
@@ -379,6 +406,7 @@ export async function processGatewayAllowlist(
                 command: params.command,
                 cwd: params.workdir,
                 warningText,
+                risk,
               } satisfies ExecToolDetails)
             : ({
                 status: "approval-pending",

@@ -34,6 +34,7 @@ export type ExecApprovalUnavailableReplyParams = {
   channelLabel?: string;
   reason: ExecApprovalUnavailableReason;
   sentApproverDms?: boolean;
+  risk?: ExecApprovalRiskMetadata;
 };
 
 export function getExecApprovalApproverDmNoticeText(): string {
@@ -141,6 +142,10 @@ export function buildExecApprovalUnavailableReplyPayload(
   const warningText = params.warningText?.trim();
   if (warningText) {
     lines.push(warningText, "");
+  }
+  const riskSummary = formatExecApprovalRiskSummary(params.risk);
+  if (riskSummary) {
+    lines.push(`Risk: ${riskSummary}`, "");
   }
 
   if (params.sentApproverDms) {

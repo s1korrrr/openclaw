@@ -13,7 +13,7 @@ const ExecApprovalCheckpointSchema = z
   .object({
     enabled: z.boolean().optional(),
     requireAtOrAbove: z
-      .union([z.literal("low"), z.literal("medium"), z.literal("high")])
+      .union([z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("critical")])
       .optional(),
   })
   .strict()
