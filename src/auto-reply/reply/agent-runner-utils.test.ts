@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FollowupRun } from "./queue.js";
 
 const hoisted = vi.hoisted(() => {
+  const resolveRunModelFallbackOrderingMock = vi.fn();
   const resolveRunModelFallbacksOverrideMock = vi.fn();
-  return { resolveRunModelFallbacksOverrideMock };
+  return { resolveRunModelFallbackOrderingMock, resolveRunModelFallbacksOverrideMock };
 });
 
 vi.mock("../../agents/agent-scope.js", () => ({
+  resolveRunModelFallbackOrdering: (...args: unknown[]) =>
+    hoisted.resolveRunModelFallbackOrderingMock(...args),
   resolveRunModelFallbacksOverride: (...args: unknown[]) =>
     hoisted.resolveRunModelFallbacksOverrideMock(...args),
 }));
@@ -45,15 +48,22 @@ function makeRun(overrides: Partial<FollowupRun["run"]> = {}): FollowupRun["run"
 
 describe("agent-runner-utils", () => {
   beforeEach(() => {
+    hoisted.resolveRunModelFallbackOrderingMock.mockClear();
     hoisted.resolveRunModelFallbacksOverrideMock.mockClear();
   });
 
   it("resolves model fallback options from run context", () => {
+    hoisted.resolveRunModelFallbackOrderingMock.mockReturnValue("lowest-cost");
     hoisted.resolveRunModelFallbacksOverrideMock.mockReturnValue(["fallback-model"]);
     const run = makeRun();
 
     const resolved = resolveModelFallbackOptions(run);
 
+    expect(hoisted.resolveRunModelFallbackOrderingMock).toHaveBeenCalledWith({
+      cfg: run.config,
+      agentId: run.agentId,
+      sessionKey: run.sessionKey,
+    });
     expect(hoisted.resolveRunModelFallbacksOverrideMock).toHaveBeenCalledWith({
       cfg: run.config,
       agentId: run.agentId,
@@ -64,21 +74,29 @@ describe("agent-runner-utils", () => {
       provider: run.provider,
       model: run.model,
       agentDir: run.agentDir,
+      fallbackOrdering: "lowest-cost",
       fallbacksOverride: ["fallback-model"],
     });
   });
 
   it("passes through missing agentId for helper-based fallback resolution", () => {
+    hoisted.resolveRunModelFallbackOrderingMock.mockReturnValue(undefined);
     hoisted.resolveRunModelFallbacksOverrideMock.mockReturnValue(["fallback-model"]);
     const run = makeRun({ agentId: undefined });
 
     const resolved = resolveModelFallbackOptions(run);
 
+    expect(hoisted.resolveRunModelFallbackOrderingMock).toHaveBeenCalledWith({
+      cfg: run.config,
+      agentId: undefined,
+      sessionKey: run.sessionKey,
+    });
     expect(hoisted.resolveRunModelFallbacksOverrideMock).toHaveBeenCalledWith({
       cfg: run.config,
       agentId: undefined,
       sessionKey: run.sessionKey,
     });
+    expect(resolved.fallbackOrdering).toBeUndefined();
     expect(resolved.fallbacksOverride).toEqual(["fallback-model"]);
   });
 

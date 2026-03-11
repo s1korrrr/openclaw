@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import type { ModelDefinitionConfig } from "../config/types.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
 import { saveAuthProfileStore } from "./auth-profiles.js";
@@ -37,6 +38,18 @@ function makeProviderFallbackCfg(provider: string): OpenClawConfig {
       },
     },
   });
+}
+
+function makeDeclaredCostModel(id: string, inputCost: number): ModelDefinitionConfig {
+  return {
+    id,
+    name: id,
+    reasoning: false,
+    input: ["text"],
+    cost: { input: inputCost, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+  };
 }
 
 async function withTempAuthStore<T>(
@@ -705,6 +718,155 @@ describe("runWithModelFallback", () => {
     expect(calls).toEqual([
       { provider: "anthropic", model: "claude-opus-4-5" },
       { provider: "openai", model: "gpt-4.1" },
+    ]);
+  });
+
+  it("reorders configured fallback chains by declared cost when opted in", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: [
+              "anthropic/claude-sonnet-4",
+              "openai/gpt-5-nano",
+              "google/gemini-2.5-flash",
+            ],
+            fallbackOrdering: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://example.test/openai",
+            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
+          },
+          anthropic: {
+            baseUrl: "https://example.test/anthropic",
+            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
+          },
+          google: {
+            baseUrl: "https://example.test/google",
+            models: [makeDeclaredCostModel("gemini-2.5-flash", 0.8)],
+          },
+        },
+      },
+    });
+
+    const calls: Array<{ provider: string; model: string }> = [];
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      run: async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "openai" && model === "gpt-4.1-mini") {
+          throw Object.assign(new Error("rate limited"), { status: 429 });
+        }
+        if (provider === "openai" && model === "gpt-5-nano") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      },
+    });
+
+    expect(result.result).toBe("ok");
+    expect(calls).toEqual([
+      { provider: "openai", model: "gpt-4.1-mini" },
+      { provider: "openai", model: "gpt-5-nano" },
+    ]);
+  });
+
+  it("keeps explicit fallbacksOverride order unless the caller opts into cost ordering", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["openai/gpt-5-nano", "anthropic/claude-sonnet-4"],
+            fallbackOrdering: "lowest-cost",
+          },
+        },
+      },
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://example.test/openai",
+            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
+          },
+          anthropic: {
+            baseUrl: "https://example.test/anthropic",
+            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
+          },
+        },
+      },
+    });
+
+    const calls: Array<{ provider: string; model: string }> = [];
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      fallbacksOverride: ["anthropic/claude-sonnet-4", "openai/gpt-5-nano"],
+      run: async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "openai" && model === "gpt-4.1-mini") {
+          throw Object.assign(new Error("rate limited"), { status: 429 });
+        }
+        if (provider === "anthropic" && model === "claude-sonnet-4") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      },
+    });
+
+    expect(result.result).toBe("ok");
+    expect(calls).toEqual([
+      { provider: "openai", model: "gpt-4.1-mini" },
+      { provider: "anthropic", model: "claude-sonnet-4" },
+    ]);
+  });
+
+  it("can reorder explicit fallbacksOverride by declared cost when the caller opts in", async () => {
+    const cfg = makeCfg({
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://example.test/openai",
+            models: [makeDeclaredCostModel("gpt-5-nano", 0.2)],
+          },
+          anthropic: {
+            baseUrl: "https://example.test/anthropic",
+            models: [makeDeclaredCostModel("claude-sonnet-4", 3)],
+          },
+        },
+      },
+    });
+
+    const calls: Array<{ provider: string; model: string }> = [];
+    const result = await runWithModelFallback({
+      cfg,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      fallbackOrdering: "lowest-cost",
+      fallbacksOverride: ["anthropic/claude-sonnet-4", "openai/gpt-5-nano"],
+      run: async (provider, model) => {
+        calls.push({ provider, model });
+        if (provider === "openai" && model === "gpt-4.1-mini") {
+          throw Object.assign(new Error("rate limited"), { status: 429 });
+        }
+        if (provider === "openai" && model === "gpt-5-nano") {
+          return "ok";
+        }
+        throw new Error(`unexpected candidate: ${provider}/${model}`);
+      },
+    });
+
+    expect(result.result).toBe("ok");
+    expect(calls).toEqual([
+      { provider: "openai", model: "gpt-4.1-mini" },
+      { provider: "openai", model: "gpt-5-nano" },
     ]);
   });
 

@@ -1,8 +1,10 @@
 import type { OpenClawConfig } from "../config/config.js";
 import {
+  resolveAgentModelFallbackOrderingValue,
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
 } from "../config/model-input.js";
+import type { AgentModelFallbackOrdering } from "../config/types.agents-shared.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
 import {
@@ -26,6 +28,7 @@ import {
   buildModelAliasIndex,
   modelKey,
   normalizeModelRef,
+  normalizeProviderId,
   resolveConfiguredModelRef,
   resolveModelRefFromString,
 } from "./model-selection.js";
@@ -197,6 +200,94 @@ function throwFallbackFailureSummary(params: {
   );
 }
 
+function resolveDeclaredCostScore(params: {
+  cfg: OpenClawConfig | undefined;
+  candidate: ModelCandidate;
+}): number | undefined {
+  const providers = params.cfg?.models?.providers;
+  if (!providers) {
+    return undefined;
+  }
+  const targetProvider = normalizeProviderId(params.candidate.provider);
+
+  for (const [providerRaw, providerConfig] of Object.entries(providers)) {
+    if (normalizeProviderId(providerRaw) !== targetProvider) {
+      continue;
+    }
+    const configuredModels = providerConfig?.models;
+    if (!Array.isArray(configuredModels)) {
+      continue;
+    }
+    for (const configuredModel of configuredModels) {
+      const configuredModelId =
+        typeof configuredModel?.id === "string" ? configuredModel.id.trim() : "";
+      if (!configuredModelId) {
+        continue;
+      }
+      if (normalizeModelRef(providerRaw, configuredModelId).model !== params.candidate.model) {
+        continue;
+      }
+      const cost = configuredModel.cost;
+      if (!cost) {
+        return undefined;
+      }
+      const values = [cost.input, cost.output, cost.cacheRead, cost.cacheWrite];
+      const hasAnyFiniteValue = values.some(
+        (value) => typeof value === "number" && Number.isFinite(value),
+      );
+      if (!hasAnyFiniteValue) {
+        return undefined;
+      }
+      return values.reduce(
+        (sum, value) => sum + (typeof value === "number" && Number.isFinite(value) ? value : 0),
+        0,
+      );
+    }
+  }
+  return undefined;
+}
+
+function orderFallbackRefsByDeclaredCost(params: {
+  cfg: OpenClawConfig | undefined;
+  fallbacks: string[];
+  defaultProvider: string;
+  aliasIndex: ReturnType<typeof buildModelAliasIndex>;
+  ordering?: AgentModelFallbackOrdering;
+}): string[] {
+  if (params.ordering !== "lowest-cost" || params.fallbacks.length < 2) {
+    return params.fallbacks;
+  }
+  return params.fallbacks
+    .map((raw, index) => {
+      const resolved = resolveModelRefFromString({
+        raw: String(raw ?? ""),
+        defaultProvider: params.defaultProvider,
+        aliasIndex: params.aliasIndex,
+      });
+      return {
+        raw,
+        index,
+        score: resolved
+          ? resolveDeclaredCostScore({ cfg: params.cfg, candidate: resolved.ref })
+          : undefined,
+      };
+    })
+    .toSorted((left, right) => {
+      if (left.score === undefined && right.score === undefined) {
+        return left.index - right.index;
+      }
+      if (left.score === undefined) {
+        return 1;
+      }
+      if (right.score === undefined) {
+        return -1;
+      }
+      const delta = left.score - right.score;
+      return delta !== 0 ? delta : left.index - right.index;
+    })
+    .map((entry) => entry.raw);
+}
+
 function resolveImageFallbackCandidates(params: {
   cfg: OpenClawConfig | undefined;
   defaultProvider: string;
@@ -253,6 +344,8 @@ function resolveFallbackCandidates(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   model: string;
+  /** Optional ordering policy for the fallback chain. */
+  fallbackOrdering?: AgentModelFallbackOrdering;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
 }): ModelCandidate[] {
@@ -304,8 +397,19 @@ function resolveFallbackCandidates(params: {
     // Same provider: always use full fallback chain (model version differences within provider).
     return configuredFallbacks;
   })();
+  const orderedModelFallbacks = orderFallbackRefsByDeclaredCost({
+    cfg: params.cfg,
+    fallbacks: modelFallbacks,
+    defaultProvider,
+    aliasIndex,
+    ordering:
+      params.fallbackOrdering ??
+      (params.fallbacksOverride === undefined
+        ? resolveAgentModelFallbackOrderingValue(params.cfg?.agents?.defaults?.model)
+        : undefined),
+  });
 
-  for (const raw of modelFallbacks) {
+  for (const raw of orderedModelFallbacks) {
     const resolved = resolveModelRefFromString({
       raw: String(raw ?? ""),
       defaultProvider,
@@ -505,6 +609,8 @@ export async function runWithModelFallback<T>(params: {
   model: string;
   runId?: string;
   agentDir?: string;
+  /** Optional ordering policy for the fallback chain. */
+  fallbackOrdering?: AgentModelFallbackOrdering;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
   run: ModelFallbackRunFn<T>;
@@ -514,6 +620,7 @@ export async function runWithModelFallback<T>(params: {
     cfg: params.cfg,
     provider: params.provider,
     model: params.model,
+    fallbackOrdering: params.fallbackOrdering,
     fallbacksOverride: params.fallbacksOverride,
   });
   const authStore = params.cfg
