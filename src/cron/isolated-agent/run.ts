@@ -29,6 +29,7 @@ import { runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
 import {
   countActiveDescendantRuns,
   listDescendantRunsForRequester,
+  type SubagentRunRecord,
 } from "../../agents/subagent-registry.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { deriveSessionTotalTokens, hasNonzeroUsage } from "../../agents/usage.js";
@@ -56,7 +57,12 @@ import {
   isExternalHookSession,
 } from "../../security/external-content.js";
 import { resolveCronDeliveryPlan } from "../delivery.js";
-import type { CronJob, CronRunOutcome, CronRunTelemetry } from "../types.js";
+import type {
+  CronJob,
+  CronRunOutcome,
+  CronRunTelemetry,
+  CronTaskGraphTelemetry,
+} from "../types.js";
 import { evaluateExecutorOutputCritic } from "./critic-loop.js";
 import {
   dispatchCronDelivery,
@@ -198,6 +204,64 @@ function appendCronDeliveryInstruction(params: {
     return params.commandBody;
   }
   return `${params.commandBody}\n\nReturn your summary as plain text; it will be delivered automatically. If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.`.trim();
+}
+
+function resolveTaskGraphLaneStatus(entry: SubagentRunRecord) {
+  if (typeof entry.endedAt !== "number") {
+    return "running" as const;
+  }
+  if (entry.endedReason === "killed") {
+    return "killed" as const;
+  }
+  switch (entry.outcome?.status) {
+    case "ok":
+      return "completed" as const;
+    case "error":
+    case "timeout":
+      return "error" as const;
+    default:
+      return "unknown" as const;
+  }
+}
+
+function buildTaskGraphTelemetry(params: {
+  rootSessionKey: string;
+  runStartedAt: number;
+}): CronTaskGraphTelemetry | undefined {
+  const lanes = listDescendantRunsForRequester(params.rootSessionKey)
+    .filter((entry) => {
+      const startedAtMs = typeof entry.startedAt === "number" ? entry.startedAt : entry.createdAt;
+      return typeof startedAtMs === "number" && startedAtMs >= params.runStartedAt;
+    })
+    .map((entry) => ({
+      runId: entry.runId,
+      childSessionKey: entry.childSessionKey,
+      model: entry.model,
+      spawnMode: entry.spawnMode,
+      startedAtMs: typeof entry.startedAt === "number" ? entry.startedAt : entry.createdAt,
+      endedAtMs: typeof entry.endedAt === "number" ? entry.endedAt : undefined,
+      status: resolveTaskGraphLaneStatus(entry),
+      endedReason: entry.endedReason,
+    }))
+    .toSorted(
+      (a, b) =>
+        (a.startedAtMs ?? Number.MAX_SAFE_INTEGER) - (b.startedAtMs ?? Number.MAX_SAFE_INTEGER) ||
+        a.childSessionKey.localeCompare(b.childSessionKey) ||
+        a.runId.localeCompare(b.runId),
+    );
+
+  if (lanes.length === 0) {
+    return undefined;
+  }
+
+  return {
+    version: 1,
+    orchestration: "subagent_fanout_join_v1",
+    joinStrategy: "wait_for_descendants",
+    laneCount: lanes.length,
+    activeLaneCount: lanes.filter((lane) => lane.status === "running").length,
+    lanes,
+  };
 }
 
 export async function runCronIsolatedAgentTurn(params: {
@@ -774,6 +838,16 @@ export async function runCronIsolatedAgentTurn(params: {
       telemetry = {
         model: modelUsed,
         provider: providerUsed,
+      };
+    }
+    const taskGraph = buildTaskGraphTelemetry({
+      rootSessionKey: agentSessionKey,
+      runStartedAt,
+    });
+    if (taskGraph) {
+      telemetry = {
+        ...telemetry,
+        taskGraph,
       };
     }
     await persistSessionEntry();

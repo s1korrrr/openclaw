@@ -2,7 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import type { CronConfig } from "../config/types.cron.js";
-import type { CronDeliveryStatus, CronRunStatus, CronRunTelemetry } from "./types.js";
+import type {
+  CronDeliveryStatus,
+  CronRunStatus,
+  CronRunTelemetry,
+  CronTaskGraphLane,
+  CronTaskGraphTelemetry,
+} from "./types.js";
 
 export type CronRunLogEntry = {
   ts: number;
@@ -49,6 +55,8 @@ type ReadCronRunLogAllPageOptions = Omit<ReadCronRunLogPageOptions, "jobId"> & {
   storePath: string;
   jobNameById?: Record<string, string>;
 };
+
+const TASK_GRAPH_LANE_STATUSES = new Set(["running", "completed", "error", "killed", "unknown"]);
 
 function assertSafeCronRunLogJobId(jobId: string): string {
   const trimmed = jobId.trim();
@@ -296,6 +304,7 @@ function parseAllRunLogEntries(raw: string, opts?: { jobId?: string }): CronRunL
                 typeof usage.cache_write_tokens === "number" ? usage.cache_write_tokens : undefined,
             }
           : undefined,
+        taskGraph: parseCronTaskGraphTelemetry(obj.taskGraph),
       };
       if (typeof obj.delivered === "boolean") {
         entry.delivered = obj.delivered;
@@ -323,6 +332,69 @@ function parseAllRunLogEntries(raw: string, opts?: { jobId?: string }): CronRunL
     }
   }
   return parsed;
+}
+
+function parseCronTaskGraphTelemetry(value: unknown): CronTaskGraphTelemetry | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.version !== 1 ||
+    record.orchestration !== "subagent_fanout_join_v1" ||
+    record.joinStrategy !== "wait_for_descendants" ||
+    !Array.isArray(record.lanes)
+  ) {
+    return undefined;
+  }
+  const lanes = record.lanes
+    .map((lane) => parseCronTaskGraphLane(lane))
+    .filter((lane): lane is CronTaskGraphLane => lane !== undefined);
+  return {
+    version: 1,
+    orchestration: "subagent_fanout_join_v1",
+    joinStrategy: "wait_for_descendants",
+    laneCount: lanes.length,
+    activeLaneCount: lanes.filter((lane) => lane.status === "running").length,
+    lanes,
+  };
+}
+
+function parseCronTaskGraphLane(value: unknown): CronTaskGraphLane | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.runId !== "string" ||
+    !record.runId.trim() ||
+    typeof record.childSessionKey !== "string" ||
+    !record.childSessionKey.trim() ||
+    typeof record.status !== "string" ||
+    !TASK_GRAPH_LANE_STATUSES.has(record.status)
+  ) {
+    return undefined;
+  }
+  return {
+    runId: record.runId,
+    childSessionKey: record.childSessionKey,
+    model: typeof record.model === "string" && record.model.trim() ? record.model : undefined,
+    spawnMode:
+      record.spawnMode === "run" || record.spawnMode === "session" ? record.spawnMode : undefined,
+    startedAtMs:
+      typeof record.startedAtMs === "number" && Number.isFinite(record.startedAtMs)
+        ? record.startedAtMs
+        : undefined,
+    endedAtMs:
+      typeof record.endedAtMs === "number" && Number.isFinite(record.endedAtMs)
+        ? record.endedAtMs
+        : undefined,
+    status: record.status as CronTaskGraphLane["status"],
+    endedReason:
+      typeof record.endedReason === "string" && record.endedReason.trim()
+        ? record.endedReason
+        : undefined,
+  };
 }
 
 function filterRunLogEntries(

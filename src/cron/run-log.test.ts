@@ -241,6 +241,31 @@ describe("cron run log", () => {
           cache_read_tokens: 2,
           cache_write_tokens: 1,
         },
+        taskGraph: {
+          version: 1,
+          orchestration: "subagent_fanout_join_v1",
+          joinStrategy: "wait_for_descendants",
+          laneCount: 2,
+          activeLaneCount: 1,
+          lanes: [
+            {
+              runId: "run-a",
+              childSessionKey: "agent:main:subagent:a",
+              status: "running",
+              startedAtMs: 10,
+              spawnMode: "run",
+            },
+            {
+              runId: "run-b",
+              childSessionKey: "agent:main:subagent:b",
+              status: "completed",
+              startedAtMs: 20,
+              endedAtMs: 25,
+              endedReason: "complete",
+              spawnMode: "session",
+            },
+          ],
+        },
       });
 
       await fs.appendFile(
@@ -267,9 +292,35 @@ describe("cron run log", () => {
         cache_read_tokens: 2,
         cache_write_tokens: 1,
       });
+      expect(entries[0]?.taskGraph).toEqual({
+        version: 1,
+        orchestration: "subagent_fanout_join_v1",
+        joinStrategy: "wait_for_descendants",
+        laneCount: 2,
+        activeLaneCount: 1,
+        lanes: [
+          {
+            runId: "run-a",
+            childSessionKey: "agent:main:subagent:a",
+            status: "running",
+            startedAtMs: 10,
+            spawnMode: "run",
+          },
+          {
+            runId: "run-b",
+            childSessionKey: "agent:main:subagent:b",
+            status: "completed",
+            startedAtMs: 20,
+            endedAtMs: 25,
+            endedReason: "complete",
+            spawnMode: "session",
+          },
+        ],
+      });
       expect(entries[1]?.model).toBeUndefined();
       expect(entries[1]?.provider).toBeUndefined();
       expect(entries[1]?.usage?.input_tokens).toBeUndefined();
+      expect(entries[1]?.taskGraph).toBeUndefined();
     });
   });
 

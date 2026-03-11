@@ -51,10 +51,33 @@ export type CronUsageSummary = {
   cache_write_tokens?: number;
 };
 
+export type CronTaskGraphLaneStatus = "running" | "completed" | "error" | "killed" | "unknown";
+
+export type CronTaskGraphLane = {
+  runId: string;
+  childSessionKey: string;
+  model?: string;
+  spawnMode?: "run" | "session";
+  startedAtMs?: number;
+  endedAtMs?: number;
+  status: CronTaskGraphLaneStatus;
+  endedReason?: string;
+};
+
+export type CronTaskGraphTelemetry = {
+  version: 1;
+  orchestration: "subagent_fanout_join_v1";
+  joinStrategy: "wait_for_descendants";
+  laneCount: number;
+  activeLaneCount: number;
+  lanes: CronTaskGraphLane[];
+};
+
 export type CronRunTelemetry = {
   model?: string;
   provider?: string;
   usage?: CronUsageSummary;
+  taskGraph?: CronTaskGraphTelemetry;
 };
 
 export type CronCriticScore = {
