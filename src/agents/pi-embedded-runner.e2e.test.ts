@@ -361,6 +361,12 @@ describe("runEmbeddedPiAgent", () => {
     expect(result.meta.planSearch?.objective).toBe("performance_gain / compute_cost");
     expect(result.meta.planSearch?.selectedCandidateId).toBeTruthy();
     expect(result.meta.planSearch?.considered).toHaveLength(3);
+    expect(result.meta.planSearch?.considered[0]?.steps.length).toBeGreaterThan(0);
+    expect(result.meta.genomeStore?.heuristic).toBe("plan_search_genome_store_v1");
+    expect(result.meta.genomeStore?.selectedFragmentId).toBe(
+      result.meta.planSearch?.selectedCandidateId,
+    );
+    expect(result.meta.genomeStore?.fragments[0]?.provenance.sourceRunId).toBeDefined();
     expect(result.meta.planSearch?.budget.withinBudgetCount).toBeGreaterThan(0);
     expect(result.meta.selfCalibration?.heuristic).toBe("plan_search_vs_terminal_run_v1");
     expect(result.meta.selfCalibration?.predicted.source).toBe("plan_search");

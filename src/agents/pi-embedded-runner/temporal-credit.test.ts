@@ -30,6 +30,13 @@ function createPlanSearchMeta(
         id: "plan-1",
         title: "Trace-first",
         strategy: "trace-first",
+        steps: [
+          "Trace the current runtime path.",
+          "Implement the smallest safe slice.",
+          "Persist metadata for replay.",
+          "Run focused tests.",
+          "Ship the change with validation notes.",
+        ],
         score: 6,
         performanceGain: 7.5,
         computeCost: 1.1,

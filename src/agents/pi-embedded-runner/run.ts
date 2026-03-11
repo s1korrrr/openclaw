@@ -64,6 +64,7 @@ import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
 import { resolveEmbeddedPiBrainsRuntimeConfig } from "./brains.js";
+import { buildEmbeddedPiGenomeStoreMeta } from "./genome-store.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModel } from "./model.js";
@@ -803,18 +804,21 @@ export async function runEmbeddedPiAgent(
       const finalizeRunResult = <T extends EmbeddedPiRunResult & { meta: EmbeddedPiRunMeta }>(
         result: T,
       ): T => {
+        const genomeStore = buildEmbeddedPiGenomeStoreMeta({
+          runId: params.runId,
+          planSearch: planSearchMeta,
+        });
         const selfCalibration = buildEmbeddedPiSelfCalibrationMeta({
           planSearch: planSearchMeta,
           runMeta: result.meta,
           payloadCount: result.payloads?.length ?? 0,
           didSendViaMessagingTool: result.didSendViaMessagingTool ?? false,
         });
-        const resultMeta: EmbeddedPiRunMeta = selfCalibration
-          ? {
-              ...result.meta,
-              selfCalibration,
-            }
-          : result.meta;
+        const resultMeta: EmbeddedPiRunMeta = {
+          ...result.meta,
+          ...(genomeStore ? { genomeStore } : {}),
+          ...(selfCalibration ? { selfCalibration } : {}),
+        };
         const temporalCredit = buildEmbeddedPiTemporalCreditMeta({
           planSearch: planSearchMeta,
           runMeta: resultMeta,
@@ -823,7 +827,7 @@ export async function runEmbeddedPiAgent(
           successfulCronAdds: result.successfulCronAdds,
           traceSpans: agentLoopTrace?.snapshotSpans() ?? [],
         });
-        if (!selfCalibration && !temporalCredit) {
+        if (!genomeStore && !selfCalibration && !temporalCredit) {
           return result;
         }
         const now = Date.now();
@@ -856,6 +860,9 @@ export async function runEmbeddedPiAgent(
             temporalCreditFactorCount: temporalCredit?.factors.length,
             temporalCreditTopPositiveFactorId: temporalCredit?.topPositiveFactorId,
             temporalCreditTopNegativeFactorId: temporalCredit?.topNegativeFactorId,
+            genomeStoreHeuristic: genomeStore?.heuristic,
+            genomeStoreFragmentCount: genomeStore?.fragments.length,
+            genomeStoreSelectedFragmentId: genomeStore?.selectedFragmentId,
           },
         });
         return {
@@ -887,7 +894,9 @@ export async function runEmbeddedPiAgent(
             budget: planSearchMeta?.budget,
             considered: planSearchMeta?.considered.map((candidate) => ({
               id: candidate.id,
+              title: candidate.title,
               strategy: candidate.strategy,
+              steps: candidate.steps,
               score: candidate.score,
               performanceGain: candidate.performanceGain,
               computeCost: candidate.computeCost,
