@@ -142,6 +142,27 @@ export type AgentPlanSearchConfig = {
   };
 };
 
+export type AgentBrainsMutatingToolsConfig = {
+  /**
+   * Execution-brain mutating-tool mode:
+   * - allow_all: keep all mutating tools available
+   * - deny_all: remove all mutating tools from the execution phase
+   * - allowlist: keep only explicitly allowed mutating tools
+   */
+  mode?: "allow_all" | "deny_all" | "allowlist";
+  /** Allowed mutating tool names when mode is allowlist. */
+  allow?: string[];
+};
+
+export type AgentBrainsConfig = {
+  /** Enable explicit research/execution brain metadata and execution guardrails. */
+  enabled?: boolean;
+  execution?: {
+    /** Further restrict mutating tools during execution while leaving read-only tools unchanged. */
+    mutatingTools?: AgentBrainsMutatingToolsConfig;
+  };
+};
+
 export type AgentDefaultsConfig = {
   /** Primary model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */
   model?: AgentModelConfig;
@@ -208,6 +229,8 @@ export type AgentDefaultsConfig = {
   };
   /** Opt-in candidate plan search before runtime execution. */
   planSearch?: AgentPlanSearchConfig;
+  /** Opt-in research/execution brain split metadata and execution guardrails. */
+  brains?: AgentBrainsConfig;
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
   /** Default thinking level when no /think directive is present. */

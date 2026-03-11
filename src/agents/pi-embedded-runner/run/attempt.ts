@@ -94,6 +94,7 @@ import { normalizeToolName } from "../../tool-policy.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
+import { applyExecutionBrainMutatingToolGuard } from "../brains.js";
 import { appendCacheTtlTimestamp, isCacheTtlEligibleProvider } from "../cache-ttl.js";
 import type { CompactEmbeddedPiSessionParams } from "../compact.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
@@ -934,11 +935,18 @@ export async function runEmbeddedAttempt(
           disableMessageTool: params.disableMessageTool,
         });
     const toolsEnabled = supportsModelTools(params.model);
-    const tools = sanitizeToolsForGoogle({
+    const sanitizedTools = sanitizeToolsForGoogle({
       tools: toolsEnabled ? toolsRaw : [],
       provider: params.provider,
     });
-    const clientTools = toolsEnabled ? params.clientTools : undefined;
+    const availableClientTools = toolsEnabled ? params.clientTools : undefined;
+    const executionBrainGuard = applyExecutionBrainMutatingToolGuard({
+      tools: sanitizedTools,
+      clientTools: availableClientTools,
+      runtime: params.brainsRuntime,
+    });
+    const tools = executionBrainGuard.tools;
+    const clientTools = executionBrainGuard.clientTools;
     const allowedToolNames = collectAllowedToolNames({
       tools,
       clientTools,
@@ -2118,6 +2126,7 @@ export async function runEmbeddedAttempt(
         ),
         attemptUsage,
         compactionCount: getCompactionCount(),
+        brainsMeta: executionBrainGuard.meta,
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
       };

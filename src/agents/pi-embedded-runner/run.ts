@@ -63,6 +63,7 @@ import {
 import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
+import { resolveEmbeddedPiBrainsRuntimeConfig } from "./brains.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModel } from "./model.js";
@@ -75,7 +76,12 @@ import {
   truncateOversizedToolResultsInSession,
   sessionLikelyHasOversizedToolResults,
 } from "./tool-result-truncation.js";
-import type { EmbeddedPiAgentMeta, EmbeddedPiRunMeta, EmbeddedPiRunResult } from "./types.js";
+import type {
+  EmbeddedPiAgentMeta,
+  EmbeddedPiBrainsMeta,
+  EmbeddedPiRunMeta,
+  EmbeddedPiRunResult,
+} from "./types.js";
 import { describeUnknownError } from "./utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
@@ -765,6 +771,11 @@ export async function runEmbeddedPiAgent(
         : undefined;
       const executionPrompt = planSearchResult?.prompt ?? params.prompt;
       const planSearchMeta = planSearchResult?.meta;
+      const brainsRuntimeConfig = resolveEmbeddedPiBrainsRuntimeConfig({
+        config: params.config,
+        agentId: workspaceResolution.agentId,
+        researchPhase: planSearchRuntimeConfig ? "plan_search" : "direct_prompt",
+      });
       agentLoopTrace?.recordSpan({
         stage: "plan",
         status: "completed",
@@ -779,8 +790,14 @@ export async function runEmbeddedPiAgent(
           selectedWithinBudget: planSearchMeta?.selectedWithinBudget,
         },
       });
-      const withPlanSearchMeta = (meta: EmbeddedPiRunMeta): EmbeddedPiRunMeta =>
-        planSearchMeta ? { ...meta, planSearch: planSearchMeta } : meta;
+      let lastBrainsMeta: EmbeddedPiBrainsMeta | undefined;
+      const withRuntimeMeta = (
+        meta: EmbeddedPiRunMeta,
+        brainsMeta: EmbeddedPiBrainsMeta | undefined = lastBrainsMeta,
+      ): EmbeddedPiRunMeta => {
+        const withPlanSearch = planSearchMeta ? { ...meta, planSearch: planSearchMeta } : meta;
+        return brainsMeta ? { ...withPlanSearch, brains: brainsMeta } : withPlanSearch;
+      };
 
       if (planSearchResult && params.onAgentEvent) {
         params.onAgentEvent({
@@ -808,6 +825,17 @@ export async function runEmbeddedPiAgent(
               computeCost: candidate.computeCost,
               withinBudget: candidate.withinBudget,
             })),
+          },
+        });
+      }
+      if (brainsRuntimeConfig && params.onAgentEvent) {
+        params.onAgentEvent({
+          stream: "planner",
+          data: {
+            phase: "brain_split_resolved",
+            researchPhase: brainsRuntimeConfig.researchPhase,
+            executionMutatingToolMode: brainsRuntimeConfig.execution.mutatingTools.mode,
+            executionMutatingToolAllowlist: brainsRuntimeConfig.execution.mutatingTools.allow,
           },
         });
       }
@@ -901,7 +929,7 @@ export async function runEmbeddedPiAgent(
                   isError: true,
                 },
               ],
-              meta: withPlanSearchMeta({
+              meta: withRuntimeMeta({
                 durationMs: Date.now() - started,
                 agentMeta: buildErrorAgentMeta({
                   sessionId: params.sessionId,
@@ -970,6 +998,7 @@ export async function runEmbeddedPiAgent(
             authStorage,
             modelRegistry,
             agentId: workspaceResolution.agentId,
+            brainsRuntime: brainsRuntimeConfig,
             legacyBeforeAgentStartResult,
             thinkLevel,
             verboseLevel: params.verboseLevel,
@@ -1010,6 +1039,7 @@ export async function runEmbeddedPiAgent(
             sessionIdUsed,
             lastAssistant,
           } = attempt;
+          lastBrainsMeta = attempt.brainsMeta ?? lastBrainsMeta;
           bootstrapPromptWarningSignaturesSeen =
             attempt.bootstrapPromptWarningSignaturesSeen ??
             (attempt.bootstrapPromptWarningSignature
@@ -1263,7 +1293,7 @@ export async function runEmbeddedPiAgent(
                   isError: true,
                 },
               ],
-              meta: withPlanSearchMeta({
+              meta: withRuntimeMeta({
                 durationMs: Date.now() - started,
                 agentMeta: buildErrorAgentMeta({
                   sessionId: sessionIdUsed,
@@ -1298,7 +1328,7 @@ export async function runEmbeddedPiAgent(
                     isError: true,
                   },
                 ],
-                meta: withPlanSearchMeta({
+                meta: withRuntimeMeta({
                   durationMs: Date.now() - started,
                   agentMeta: buildErrorAgentMeta({
                     sessionId: sessionIdUsed,
@@ -1330,7 +1360,7 @@ export async function runEmbeddedPiAgent(
                     isError: true,
                   },
                 ],
-                meta: withPlanSearchMeta({
+                meta: withRuntimeMeta({
                   durationMs: Date.now() - started,
                   agentMeta: buildErrorAgentMeta({
                     sessionId: sessionIdUsed,
@@ -1604,7 +1634,7 @@ export async function runEmbeddedPiAgent(
                   isError: true,
                 },
               ],
-              meta: withPlanSearchMeta({
+              meta: withRuntimeMeta({
                 durationMs: Date.now() - started,
                 agentMeta,
                 aborted,
@@ -1637,7 +1667,7 @@ export async function runEmbeddedPiAgent(
           }
           return {
             payloads: payloads.length ? payloads : undefined,
-            meta: withPlanSearchMeta({
+            meta: withRuntimeMeta({
               durationMs: Date.now() - started,
               agentMeta,
               aborted,

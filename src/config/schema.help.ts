@@ -1119,6 +1119,18 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum estimated runtime in milliseconds for an individual candidate plan. Use this to avoid selecting long validation-heavy plans when you need a faster iteration loop.",
   "agents.defaults.planSearch.budget.maxCostUsd":
     "Maximum estimated model spend in USD for an individual candidate plan, derived from the active model pricing metadata. Use this to cap planner-selected work when model cost matters.",
+  "agents.defaults.brains":
+    "Opt-in research versus execution brain split metadata. In the current wave-2 slice, plan search remains the research seam and execution guardrails can further restrict mutating tools without changing read-only tool access.",
+  "agents.defaults.brains.enabled":
+    "Enables brain-split metadata and execution-phase mutating-tool guardrails for the resolved agent. Disabled by default so existing tool behavior stays unchanged until explicitly opted in.",
+  "agents.defaults.brains.execution":
+    "Execution-brain guardrails applied after research/planning completes. Use this to keep speculative plan generation separate from the narrower tool surface allowed during execution.",
+  "agents.defaults.brains.execution.mutatingTools":
+    "Execution-only overlay for mutating tools. Read-only tools remain available; only mutating tools are filtered after the normal tool policy and provider gating are resolved.",
+  "agents.defaults.brains.execution.mutatingTools.mode":
+    'Execution mutating-tool mode: "allow_all" keeps current behavior, "deny_all" removes all mutating tools, and "allowlist" keeps only explicitly allowed mutating tools for the execution phase.',
+  "agents.defaults.brains.execution.mutatingTools.allow":
+    "Allowed mutating tool names when execution mutating-tool mode is set to allowlist. Names are normalized before matching so aliases like slash-vs-dot tool names stay stable.",
   "agents.defaults.humanDelay.mode": 'Delay style for block replies ("off", "natural", "custom").',
   "agents.defaults.humanDelay.minMs": "Minimum delay in ms for custom humanDelay (default: 800).",
   "agents.defaults.humanDelay.maxMs": "Maximum delay in ms for custom humanDelay (default: 2500).",
