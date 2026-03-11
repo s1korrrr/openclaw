@@ -4,6 +4,7 @@ import path from "node:path";
 import "./test-helpers/fast-coding-tools.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import { readAgentLoopTimeline } from "./agent-loop-trace.js";
 
 function createMockUsage(input: number, output: number) {
   return {
@@ -143,6 +144,17 @@ const nextSessionFile = () => {
 const nextRunId = (prefix = "run-embedded-test") => `${prefix}-${++runCounter}`;
 const nextSessionKey = () => `agent:test:embedded:${nextRunId("session-key")}`;
 const immediateEnqueue = async <T>(task: () => Promise<T>) => task();
+
+const waitForTimeline = async (filePath: string, runId: string) => {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const timeline = await readAgentLoopTimeline({ filePath, runId });
+    if (timeline.length > 0) {
+      return timeline;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return [];
+};
 
 const runWithOrphanedSingleUserMessage = async (text: string, sessionKey: string) => {
   const sessionFile = nextSessionFile();
@@ -340,5 +352,63 @@ describe("runEmbeddedPiAgent", () => {
     expect(plannerEvent).toBeDefined();
     expect(plannerEvent?.data?.phase).toBe("plan_search_selected");
     expect(plannerEvent?.data?.objective).toBe("performance_gain / compute_cost");
+  });
+
+  it("writes a queryable agent-loop timeline when diagnostics tracing is enabled", async () => {
+    const sessionFile = nextSessionFile();
+    const sessionKey = nextSessionKey();
+    const traceFilePath = path.join(tempRoot ?? os.tmpdir(), "agent-loop-trace.jsonl");
+    const cfg = {
+      ...makeOpenAiConfig(["mock-1"]),
+      models: {
+        providers: {
+          openai: {
+            api: "openai-responses",
+            apiKey: "sk-test",
+            baseUrl: "https://example.com",
+            models: [
+              {
+                id: "mock-1",
+                name: "Mock mock-1",
+                reasoning: false,
+                input: ["text"],
+                cost: { input: 1_000, output: 2_000, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 16_000,
+                maxTokens: 2048,
+              },
+            ],
+          },
+        },
+      },
+      diagnostics: {
+        agentLoopTrace: {
+          enabled: true,
+          filePath: traceFilePath,
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    const runId = nextRunId("agent-loop-trace");
+    await runEmbeddedPiAgent({
+      sessionId: "session:test",
+      sessionKey,
+      sessionFile,
+      workspaceDir,
+      config: cfg,
+      prompt: "trace this run",
+      provider: "openai",
+      model: "mock-1",
+      timeoutMs: 5_000,
+      agentDir,
+      runId,
+      enqueue: immediateEnqueue,
+    });
+
+    const timeline = await waitForTimeline(traceFilePath, runId);
+    expect(timeline.map((entry) => entry.stage)).toEqual(["plan", "replan", "observation"]);
+    expect(timeline[1]?.attempt).toBe(1);
+    expect(timeline[1]?.status).toBe("completed");
+    expect(timeline[2]?.observationKind).toBe("assistant_response");
+    expect(timeline[2]?.costUsd).toBeGreaterThan(0);
   });
 });

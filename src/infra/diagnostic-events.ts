@@ -147,6 +147,46 @@ export type DiagnosticToolLoopEvent = DiagnosticBaseEvent & {
   pairedToolName?: string;
 };
 
+export type DiagnosticAgentLoopSpanEvent = DiagnosticBaseEvent & {
+  type: "agent.loop.span";
+  runId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  provider?: string;
+  modelId?: string;
+  stage: "plan" | "tool" | "observation" | "replan";
+  stepId: string;
+  stepIndex: number;
+  parentStepId?: string;
+  attempt?: number;
+  startedAtMs: number;
+  endedAtMs: number;
+  durationMs: number;
+  status: "completed" | "failed" | "aborted" | "retry";
+  reason?: string;
+  toolName?: string;
+  toolCallId?: string;
+  observationKind?:
+    | "plan_result"
+    | "tool_result"
+    | "assistant_response"
+    | "assistant_error"
+    | "prompt_error"
+    | "timeout"
+    | "client_tool_call";
+  usage?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    total?: number;
+  };
+  costUsd?: number;
+  failureReason?: string;
+  stopReason?: string;
+  details?: Record<string, unknown>;
+};
+
 export type DiagnosticEventPayload =
   | DiagnosticUsageEvent
   | DiagnosticWebhookReceivedEvent
@@ -160,7 +200,8 @@ export type DiagnosticEventPayload =
   | DiagnosticLaneDequeueEvent
   | DiagnosticRunAttemptEvent
   | DiagnosticHeartbeatEvent
-  | DiagnosticToolLoopEvent;
+  | DiagnosticToolLoopEvent
+  | DiagnosticAgentLoopSpanEvent;
 
 export type DiagnosticEventInput = DiagnosticEventPayload extends infer Event
   ? Event extends DiagnosticEventPayload

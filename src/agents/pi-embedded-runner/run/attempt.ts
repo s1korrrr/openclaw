@@ -28,6 +28,8 @@ import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { resolveUserPath } from "../../../utils.js";
 import { normalizeMessageChannel } from "../../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../../utils/provider-utils.js";
+import { estimateUsageCost } from "../../../utils/usage-format.js";
+import { getAgentLoopTrace } from "../../agent-loop-trace.js";
 import { resolveOpenClawAgentDir } from "../../agent-paths.js";
 import { resolveSessionAgentIds } from "../../agent-scope.js";
 import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
@@ -749,6 +751,52 @@ export async function runEmbeddedAttempt(
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
   const prevCwd = process.cwd();
   const runAbortController = new AbortController();
+  const agentLoopTrace = getAgentLoopTrace(params.runId);
+  const replanStepId = agentLoopTrace?.startSpan({
+    stage: "replan",
+    attempt: params.attemptNumber,
+    reason: params.replanReason ?? "initial_prompt",
+    provider: params.provider,
+    modelId: params.modelId,
+    modelApi: params.model.api,
+    details: {
+      thinkingLevel: params.thinkLevel,
+      timeoutMs: params.timeoutMs,
+    },
+  });
+  let replanTraceFinished = false;
+  const finishReplanTrace = (overrides: {
+    status: "completed" | "failed" | "aborted" | "retry";
+    usage?: {
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      cacheWrite?: number;
+      total?: number;
+    };
+    costUsd?: number;
+    failureReason?: string;
+    stopReason?: string;
+    details?: Record<string, unknown>;
+  }) => {
+    if (!agentLoopTrace || !replanStepId || replanTraceFinished) {
+      return;
+    }
+    replanTraceFinished = true;
+    agentLoopTrace.finishSpan(replanStepId, {
+      status: overrides.status,
+      attempt: params.attemptNumber,
+      reason: params.replanReason ?? "initial_prompt",
+      provider: params.provider,
+      modelId: params.modelId,
+      modelApi: params.model.api,
+      usage: overrides.usage,
+      costUsd: overrides.costUsd,
+      failureReason: overrides.failureReason,
+      stopReason: overrides.stopReason,
+      details: overrides.details,
+    });
+  };
   ensureGlobalUndiciStreamTimeouts();
 
   log.debug(
@@ -1154,6 +1202,7 @@ export async function runEmbeddedAttempt(
 
       // Add client tools (OpenResponses hosted tools) to customTools
       let clientToolCallDetected: { name: string; params: Record<string, unknown> } | null = null;
+      let clientToolCallName: string | undefined;
       const clientToolLoopDetection = resolveToolLoopDetectionConfig({
         cfg: params.config,
         agentId: sessionAgentId,
@@ -1163,6 +1212,7 @@ export async function runEmbeddedAttempt(
             clientTools,
             (toolName, toolParams) => {
               clientToolCallDetected = { name: toolName, params: toolParams };
+              clientToolCallName = toolName;
             },
             {
               agentId: sessionAgentId,
@@ -2043,7 +2093,8 @@ export async function runEmbeddedAttempt(
           });
       }
 
-      return {
+      const attemptUsage = getUsageTotals();
+      const result = {
         aborted,
         timedOut,
         timedOutDuringCompaction,
@@ -2065,11 +2116,36 @@ export async function runEmbeddedAttempt(
         cloudCodeAssistFormatError: Boolean(
           lastAssistant?.errorMessage && isCloudCodeAssistFormatError(lastAssistant.errorMessage),
         ),
-        attemptUsage: getUsageTotals(),
+        attemptUsage,
         compactionCount: getCompactionCount(),
         // Client tool call detected (OpenResponses hosted tools)
         clientToolCall: clientToolCallDetected ?? undefined,
       };
+      const failureReason =
+        promptError != null
+          ? describeUnknownError(promptError)
+          : lastAssistant?.stopReason === "error"
+            ? lastAssistant.errorMessage?.trim() || "assistant error"
+            : undefined;
+      finishReplanTrace({
+        status: aborted ? "aborted" : failureReason ? "failed" : "completed",
+        usage: attemptUsage,
+        costUsd: estimateUsageCost({
+          usage: attemptUsage,
+          cost: params.model.cost,
+        }),
+        failureReason,
+        stopReason:
+          typeof lastAssistant?.stopReason === "string" ? lastAssistant.stopReason : undefined,
+        details: {
+          toolCount: toolMetasNormalized.length,
+          compactionCount: result.compactionCount ?? 0,
+          timedOut,
+          timedOutDuringCompaction,
+          clientToolCallName,
+        },
+      });
+      return result;
     } finally {
       // Always tear down the session (and release the lock) before we leave this attempt.
       //
@@ -2089,6 +2165,12 @@ export async function runEmbeddedAttempt(
       releaseWsSession(params.sessionId);
       await sessionLock.release();
     }
+  } catch (err) {
+    finishReplanTrace({
+      status: isRunnerAbortError(err) ? "aborted" : "failed",
+      failureReason: describeUnknownError(err),
+    });
+    throw err;
   } finally {
     restoreSkillEnv?.();
     process.chdir(prevCwd);

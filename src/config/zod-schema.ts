@@ -280,6 +280,13 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        agentLoopTrace: z
+          .object({
+            enabled: z.boolean().optional(),
+            filePath: z.string().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

@@ -1,5 +1,10 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import { describe, expect, it, vi } from "vitest";
+import {
+  clearAgentLoopTrace,
+  createAgentLoopTrace,
+  registerAgentLoopTrace,
+} from "./agent-loop-trace.js";
 import type { MessagingToolSend } from "./pi-embedded-messaging.js";
 import {
   handleToolExecutionEnd,
@@ -56,6 +61,76 @@ function createTestContext(): {
 
   return { ctx, warn, onBlockReplyFlush };
 }
+
+describe("handleToolExecution trace spans", () => {
+  it("records tool and observation spans when agent-loop tracing is active", async () => {
+    const { ctx } = createTestContext();
+    const lines: string[] = [];
+    const trace = createAgentLoopTrace({
+      cfg: {
+        diagnostics: {
+          agentLoopTrace: {
+            enabled: true,
+            filePath: "/tmp/agent-loop-trace.jsonl",
+          },
+        },
+      },
+      env: {},
+      runId: "run-test",
+      writer: {
+        filePath: "memory",
+        write: (line) => lines.push(line),
+      },
+    });
+    const replanStepId = trace?.startSpan({
+      stage: "replan",
+      attempt: 1,
+      reason: "initial_prompt",
+    });
+    registerAgentLoopTrace("run-test", trace);
+
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "read",
+        toolCallId: "tool-trace-1",
+        args: { path: "/tmp/example.txt" },
+      } as never,
+    );
+
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "read",
+        toolCallId: "tool-trace-1",
+        isError: false,
+        result: { text: "file contents" },
+      } as never,
+    );
+
+    clearAgentLoopTrace("run-test");
+
+    expect(replanStepId).toBeTruthy();
+    expect(lines).toHaveLength(2);
+    const toolSpan = JSON.parse(lines[0] ?? "{}") as {
+      stage?: string;
+      parentStepId?: string;
+      stepId?: string;
+    };
+    const observationSpan = JSON.parse(lines[1] ?? "{}") as {
+      stage?: string;
+      parentStepId?: string;
+      observationKind?: string;
+    };
+    expect(toolSpan.stage).toBe("tool");
+    expect(toolSpan.parentStepId).toBe(replanStepId);
+    expect(observationSpan.stage).toBe("observation");
+    expect(observationSpan.parentStepId).toBe(toolSpan.stepId);
+    expect(observationSpan.observationKind).toBe("tool_result");
+  });
+});
 
 describe("handleToolExecutionStart read path checks", () => {
   it("does not warn when read tool uses file_path alias", async () => {
