@@ -2,6 +2,12 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { loadConfig } from "../config/config.js";
 import { buildExecApprovalUnavailableReplyPayload } from "../infra/exec-approval-reply.js";
 import {
+  classifyExecApprovalRisk,
+  resolveExecApprovalCheckpointThreshold,
+  shouldRequireExecApprovalCheckpoint,
+  withExecApprovalCheckpointMetadata,
+} from "../infra/exec-approval-risk.js";
+import {
   hasConfiguredExecApprovalDmRoute,
   resolveExecApprovalInitiatingSurfaceState,
 } from "../infra/exec-approval-surface.js";
@@ -111,6 +117,23 @@ export async function processGatewayAllowlist(
     logInfo(`exec: obfuscation detected (gateway): ${obfuscation.reasons.join(", ")}`);
     params.warnings.push(`⚠️ Obfuscated command detected: ${obfuscation.reasons.join("; ")}`);
   }
+  const cfg = loadConfig();
+  const checkpointThreshold = resolveExecApprovalCheckpointThreshold(
+    cfg.approvals?.exec?.checkpoints,
+  );
+  const baseRisk = classifyExecApprovalRisk({
+    host: "gateway",
+    security: hostSecurity,
+    obfuscationDetected: obfuscation.detected,
+  });
+  const requiresCheckpointApproval = shouldRequireExecApprovalCheckpoint({
+    risk: baseRisk,
+    checkpointThreshold,
+  });
+  const risk = withExecApprovalCheckpointMetadata({
+    risk: baseRisk,
+    checkpointThreshold,
+  });
   const recordMatchedAllowlistUse = (resolvedPath?: string) => {
     if (allowlistMatches.length === 0) {
       return;
@@ -137,7 +160,8 @@ export async function processGatewayAllowlist(
       allowlistSatisfied,
     }) ||
     requiresHeredocApproval ||
-    obfuscation.detected;
+    obfuscation.detected ||
+    requiresCheckpointApproval;
   if (requiresHeredocApproval) {
     params.warnings.push(
       "Warning: heredoc execution requires explicit approval in allowlist mode.",
@@ -175,6 +199,7 @@ export async function processGatewayAllowlist(
         sessionKey: params.sessionKey,
       }),
       resolvedPath,
+      risk,
       ...buildExecApprovalTurnSourceContext(params),
     });
     expiresAtMs = registration.expiresAtMs;
@@ -183,7 +208,6 @@ export async function processGatewayAllowlist(
       channel: params.turnSourceChannel,
       accountId: params.turnSourceAccountId,
     });
-    const cfg = loadConfig();
     const sentApproverDms =
       (initiatingSurface.kind === "disabled" || initiatingSurface.kind === "unsupported") &&
       hasConfiguredExecApprovalDmRoute(cfg);
@@ -340,6 +364,7 @@ export async function processGatewayAllowlist(
                     command: params.command,
                     cwd: params.workdir,
                     host: "gateway",
+                    risk,
                   }),
           },
         ],
@@ -364,6 +389,7 @@ export async function processGatewayAllowlist(
                 command: params.command,
                 cwd: params.workdir,
                 warningText,
+                risk,
               } satisfies ExecToolDetails),
       },
     };

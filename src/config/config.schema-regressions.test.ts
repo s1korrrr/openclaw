@@ -134,6 +134,22 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("accepts exec risk checkpoint config", () => {
+    const res = validateConfigObject({
+      approvals: {
+        exec: {
+          enabled: true,
+          checkpoints: {
+            enabled: true,
+            requireAtOrAbove: "medium",
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
   it("rejects non-positive pdf limits", () => {
     const res = validateConfigObject({
       agents: {

@@ -3,6 +3,12 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { loadConfig } from "../config/config.js";
 import { buildExecApprovalUnavailableReplyPayload } from "../infra/exec-approval-reply.js";
 import {
+  classifyExecApprovalRisk,
+  resolveExecApprovalCheckpointThreshold,
+  shouldRequireExecApprovalCheckpoint,
+  withExecApprovalCheckpointMetadata,
+} from "../infra/exec-approval-risk.js";
+import {
   hasConfiguredExecApprovalDmRoute,
   resolveExecApprovalInitiatingSurfaceState,
 } from "../infra/exec-approval-surface.js";
@@ -183,13 +189,33 @@ export async function executeNodeHostCommand(
     );
     params.warnings.push(`⚠️ Obfuscated command detected: ${obfuscation.reasons.join("; ")}`);
   }
+  const cfg = loadConfig();
+  const checkpointThreshold = resolveExecApprovalCheckpointThreshold(
+    cfg.approvals?.exec?.checkpoints,
+  );
+  const baseRisk = classifyExecApprovalRisk({
+    host: "node",
+    security: hostSecurity,
+    systemRunPlan: prepared.plan,
+    obfuscationDetected: obfuscation.detected,
+  });
+  const requiresCheckpointApproval = shouldRequireExecApprovalCheckpoint({
+    risk: baseRisk,
+    checkpointThreshold,
+  });
+  const risk = withExecApprovalCheckpointMetadata({
+    risk: baseRisk,
+    checkpointThreshold,
+  });
   const requiresAsk =
     requiresExecApproval({
       ask: hostAsk,
       security: hostSecurity,
       analysisOk,
       allowlistSatisfied,
-    }) || obfuscation.detected;
+    }) ||
+    obfuscation.detected ||
+    requiresCheckpointApproval;
   const invokeTimeoutMs = Math.max(
     10_000,
     (typeof params.timeoutSec === "number" ? params.timeoutSec : params.defaultTimeoutSec) * 1000 +
@@ -249,6 +275,7 @@ export async function executeNodeHostCommand(
         agentId: runAgentId,
         sessionKey: runSessionKey,
       }),
+      risk,
       ...buildExecApprovalTurnSourceContext(params),
     });
     expiresAtMs = registration.expiresAtMs;
@@ -257,7 +284,6 @@ export async function executeNodeHostCommand(
       channel: params.turnSourceChannel,
       accountId: params.turnSourceAccountId,
     });
-    const cfg = loadConfig();
     const sentApproverDms =
       (initiatingSurface.kind === "disabled" || initiatingSurface.kind === "unsupported") &&
       hasConfiguredExecApprovalDmRoute(cfg);
@@ -393,6 +419,7 @@ export async function executeNodeHostCommand(
                   cwd: runCwd,
                   host: "node",
                   nodeId,
+                  risk,
                 }),
         },
       ],
@@ -419,6 +446,7 @@ export async function executeNodeHostCommand(
               cwd: params.workdir,
               nodeId,
               warningText,
+              risk,
             } satisfies ExecToolDetails),
     };
   }

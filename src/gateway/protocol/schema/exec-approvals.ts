@@ -85,6 +85,19 @@ export const ExecApprovalsNodeSetParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ExecApprovalRiskTierSchema = Type.Union([
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
+]);
+
+const ExecApprovalRiskReasonSchema = Type.Union([
+  Type.Literal("node-host"),
+  Type.Literal("full-security"),
+  Type.Literal("mutable-file-operand"),
+  Type.Literal("obfuscated-command"),
+]);
+
 export const ExecApprovalRequestParamsSchema = Type.Object(
   {
     id: Type.Optional(NonEmptyString),
@@ -129,6 +142,21 @@ export const ExecApprovalRequestParamsSchema = Type.Object(
     turnSourceTo: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     turnSourceAccountId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Null()])),
+    risk: Type.Optional(
+      Type.Union([
+        Type.Object(
+          {
+            tier: ExecApprovalRiskTierSchema,
+            reasons: Type.Array(ExecApprovalRiskReasonSchema),
+            checkpointThreshold: Type.Optional(
+              Type.Union([ExecApprovalRiskTierSchema, Type.Null()]),
+            ),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Null(),
+      ]),
+    ),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
     twoPhase: Type.Optional(Type.Boolean()),
   },

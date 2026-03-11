@@ -1,6 +1,8 @@
 import path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
+import type { ExecApprovalRiskMetadata } from "../infra/exec-approval-risk.js";
+import { formatExecApprovalRiskSummary } from "../infra/exec-approval-risk.js";
 import { type ExecHost } from "../infra/exec-approvals.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { isDangerousHostEnvVarName } from "../infra/host-env-security.js";
@@ -238,6 +240,7 @@ export function buildApprovalPendingMessage(params: {
   cwd: string;
   host: "gateway" | "node";
   nodeId?: string;
+  risk?: ExecApprovalRiskMetadata;
 }) {
   let fence = "```";
   while (params.command.includes(fence)) {
@@ -253,6 +256,10 @@ export function buildApprovalPendingMessage(params: {
   lines.push(`Host: ${params.host}`);
   if (params.nodeId) {
     lines.push(`Node: ${params.nodeId}`);
+  }
+  const riskSummary = formatExecApprovalRiskSummary(params.risk);
+  if (riskSummary) {
+    lines.push(`Risk: ${riskSummary}`);
   }
   lines.push(`CWD: ${params.cwd}`);
   lines.push("Command:");

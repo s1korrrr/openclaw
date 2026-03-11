@@ -1,4 +1,5 @@
 import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
+import type { ExecApprovalRiskMetadata } from "../../infra/exec-approval-risk.js";
 import {
   DEFAULT_EXEC_APPROVAL_TIMEOUT_MS,
   type ExecApprovalDecision,
@@ -52,6 +53,7 @@ export function createExecApprovalHandlers(
         turnSourceTo?: string;
         turnSourceAccountId?: string;
         turnSourceThreadId?: string | number;
+        risk?: ExecApprovalRiskMetadata | null;
         timeoutMs?: number;
         twoPhase?: boolean;
       };
@@ -145,6 +147,7 @@ export function createExecApprovalHandlers(
         turnSourceAccountId:
           typeof p.turnSourceAccountId === "string" ? p.turnSourceAccountId.trim() || null : null,
         turnSourceThreadId: p.turnSourceThreadId ?? null,
+        risk: p.risk ?? null,
       };
       const record = manager.create(request, timeoutMs, explicitId);
       record.requestedByConnId = client?.connId ?? null;

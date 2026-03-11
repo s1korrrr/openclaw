@@ -1,3 +1,4 @@
+import type { ExecApprovalRiskMetadata } from "../infra/exec-approval-risk.js";
 import type { ExecAsk, ExecSecurity, SystemRunApprovalPlan } from "../infra/exec-approvals.js";
 import {
   DEFAULT_APPROVAL_REQUEST_TIMEOUT_MS,
@@ -23,6 +24,7 @@ export type RequestExecApprovalDecisionParams = {
   turnSourceTo?: string;
   turnSourceAccountId?: string;
   turnSourceThreadId?: string | number;
+  risk?: ExecApprovalRiskMetadata;
 };
 
 type ExecApprovalRequestToolParams = RequestExecApprovalDecisionParams & {
@@ -51,6 +53,7 @@ function buildExecApprovalRequestToolParams(
     turnSourceTo: params.turnSourceTo,
     turnSourceAccountId: params.turnSourceAccountId,
     turnSourceThreadId: params.turnSourceThreadId,
+    ...(params.risk ? { risk: params.risk } : {}),
     timeoutMs: DEFAULT_APPROVAL_TIMEOUT_MS,
     twoPhase: true,
   };
@@ -166,6 +169,7 @@ type HostExecApprovalParams = {
   turnSourceTo?: string;
   turnSourceAccountId?: string;
   turnSourceThreadId?: string | number;
+  risk?: ExecApprovalRiskMetadata;
 };
 
 type ExecApprovalRequesterContext = {
@@ -221,6 +225,7 @@ function buildHostApprovalDecisionParams(
     }),
     resolvedPath: params.resolvedPath,
     ...buildExecApprovalTurnSourceContext(params),
+    risk: params.risk,
   };
 }
 

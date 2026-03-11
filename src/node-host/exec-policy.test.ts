@@ -91,6 +91,14 @@ describe("evaluateSystemRunPolicy", () => {
     expect(denied.requiresAsk).toBe(true);
   });
 
+  it("requires approval when a risk checkpoint is triggered", () => {
+    const denied = expectDeniedDecision(
+      evaluateSystemRunPolicy(buildPolicyParams({ checkpointRequiresApproval: true })),
+    );
+    expect(denied.eventReason).toBe("approval-required");
+    expect(denied.requiresAsk).toBe(true);
+  });
+
   it("allows allowlist miss when explicit approval is provided", () => {
     const allowed = expectAllowedDecision(
       evaluateSystemRunPolicy(
