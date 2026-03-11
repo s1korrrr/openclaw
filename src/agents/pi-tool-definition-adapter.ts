@@ -12,6 +12,7 @@ import {
   isToolWrappedWithBeforeToolCallHook,
   runBeforeToolCallHook,
 } from "./pi-tools.before-tool-call.js";
+import { getToolExecutionReliabilityMetadata } from "./pi-tools.reliability.js";
 import { normalizeToolName } from "./tool-policy.js";
 import { jsonResult } from "./tools/common.js";
 
@@ -192,15 +193,33 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
             throw err;
           }
           const described = describeToolExecutionError(err);
+          const reliability = getToolExecutionReliabilityMetadata(err);
           if (described.stack && described.stack !== described.message) {
             logDebug(`tools: ${normalizedName} failed stack:\n${described.stack}`);
           }
-          logError(`[tools] ${normalizedName} failed: ${described.message}`);
+          const reliabilitySummary = reliability
+            ? ` classification=${reliability.classification} attempts=${reliability.attemptCount}/${reliability.maxAttempts} retryable=${reliability.retryable} transient=${reliability.transient} mutating=${reliability.mutatingAction}`
+            : "";
+          logError(`[tools] ${normalizedName} failed${reliabilitySummary}: ${described.message}`);
 
           return jsonResult({
             status: "error",
             tool: normalizedName,
             error: described.message,
+            ...(reliability
+              ? {
+                  reliability: {
+                    classification: reliability.classification,
+                    retryable: reliability.retryable,
+                    transient: reliability.transient,
+                    attemptCount: reliability.attemptCount,
+                    maxAttempts: reliability.maxAttempts,
+                    mutatingAction: reliability.mutatingAction,
+                    ...(reliability.errorCode ? { errorCode: reliability.errorCode } : {}),
+                    ...(reliability.errorName ? { errorName: reliability.errorName } : {}),
+                  },
+                }
+              : {}),
           });
         }
       },

@@ -41,6 +41,7 @@ import {
   wrapToolWorkspaceRootGuardWithOptions,
   wrapToolParamNormalization,
 } from "./pi-tools.read.js";
+import { wrapToolWithReliability } from "./pi-tools.reliability.js";
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
@@ -595,7 +596,8 @@ export function createOpenClawCodingTools(options?: {
       modelId: options?.modelId,
     }),
   );
-  const withHooks = normalized.map((tool) =>
+  const withReliability = normalized.map((tool) => wrapToolWithReliability(tool));
+  const withHooks = withReliability.map((tool) =>
     wrapToolWithBeforeToolCallHook(tool, {
       agentId,
       sessionKey: options?.sessionKey,
