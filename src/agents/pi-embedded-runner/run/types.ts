@@ -7,6 +7,8 @@ import type { ContextEngine } from "../../../context-engine/types.js";
 import type { PluginHookBeforeAgentStartResult } from "../../../plugins/types.js";
 import type { MessagingToolSend } from "../../pi-embedded-messaging.js";
 import type { NormalizedUsage } from "../../usage.js";
+import type { EmbeddedPiBrainsRuntimeConfig } from "../brains.js";
+import type { EmbeddedPiBrainsMeta } from "../types.js";
 import type { RunEmbeddedPiAgentParams } from "./params.js";
 
 type EmbeddedRunAttemptBase = Omit<
@@ -33,6 +35,7 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
   thinkLevel: ThinkLevel;
+  brainsRuntime?: EmbeddedPiBrainsRuntimeConfig;
   legacyBeforeAgentStartResult?: PluginHookBeforeAgentStartResult;
 };
 
@@ -66,6 +69,7 @@ export type EmbeddedRunAttemptResult = {
   cloudCodeAssistFormatError: boolean;
   attemptUsage?: NormalizedUsage;
   compactionCount?: number;
+  brainsMeta?: EmbeddedPiBrainsMeta;
   /** Client tool call detected (OpenResponses hosted tools). */
   clientToolCall?: { name: string; params: Record<string, unknown> };
 };

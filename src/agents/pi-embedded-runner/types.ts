@@ -72,12 +72,30 @@ export type EmbeddedPiPlanSearchMeta = {
   scoringError?: string;
 };
 
+export type EmbeddedPiBrainsMeta = {
+  enabled: boolean;
+  research: {
+    phase: "plan_search" | "direct_prompt";
+  };
+  execution: {
+    mutatingTools: {
+      mode: "allow_all" | "deny_all" | "allowlist";
+      active: boolean;
+      configuredAllow: string[];
+      available: string[];
+      allowed: string[];
+      blocked: string[];
+    };
+  };
+};
+
 export type EmbeddedPiRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedPiAgentMeta;
   aborted?: boolean;
   systemPromptReport?: SessionSystemPromptReport;
   planSearch?: EmbeddedPiPlanSearchMeta;
+  brains?: EmbeddedPiBrainsMeta;
   error?: {
     kind:
       | "context_overflow"

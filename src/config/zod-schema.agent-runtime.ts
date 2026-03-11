@@ -778,6 +778,26 @@ export const AgentEntrySchema = z
     model: AgentModelSchema.optional(),
     skills: z.array(z.string()).optional(),
     memorySearch: MemorySearchSchema,
+    brains: z
+      .object({
+        enabled: z.boolean().optional(),
+        execution: z
+          .object({
+            mutatingTools: z
+              .object({
+                mode: z
+                  .union([z.literal("allow_all"), z.literal("deny_all"), z.literal("allowlist")])
+                  .optional(),
+                allow: z.array(z.string()).optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     humanDelay: HumanDelaySchema.optional(),
     heartbeat: HeartbeatSchema,
     identity: IdentitySchema,
