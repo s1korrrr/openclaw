@@ -11,6 +11,12 @@ import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import type { PluginHookBeforeAgentStartResult } from "../../plugins/types.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
+import { estimateUsageCost } from "../../utils/usage-format.js";
+import {
+  clearAgentLoopTrace,
+  createAgentLoopTrace,
+  registerAgentLoopTrace,
+} from "../agent-loop-trace.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { hasConfiguredModelFallbacks } from "../agent-scope.js";
 import {
@@ -388,6 +394,18 @@ export async function runEmbeddedPiAgent(
         ctxInfo.tokens < (model.contextWindow ?? Infinity)
           ? { ...model, contextWindow: ctxInfo.tokens }
           : model;
+      const agentLoopTrace = createAgentLoopTrace({
+        cfg: params.config,
+        env: process.env,
+        runId: params.runId,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+        provider,
+        modelId,
+        modelApi: model.api,
+        workspaceDir: resolvedWorkspace,
+      });
+      registerAgentLoopTrace(params.runId, agentLoopTrace);
       const ctxGuard = evaluateContextWindowGuard({
         info: ctxInfo,
         warnBelowTokens: CONTEXT_WINDOW_WARN_BELOW_TOKENS,
@@ -736,6 +754,7 @@ export async function runEmbeddedPiAgent(
         }
       };
 
+      const planStartedAt = Date.now();
       const planSearchRuntimeConfig = resolvePlanSearchRuntimeConfig(params.config);
       const planSearchResult = planSearchRuntimeConfig
         ? runPlanSearch({
@@ -746,6 +765,20 @@ export async function runEmbeddedPiAgent(
         : undefined;
       const executionPrompt = planSearchResult?.prompt ?? params.prompt;
       const planSearchMeta = planSearchResult?.meta;
+      agentLoopTrace?.recordSpan({
+        stage: "plan",
+        status: "completed",
+        startedAtMs: planStartedAt,
+        endedAtMs: Date.now(),
+        reason: planSearchRuntimeConfig ? "plan_search" : "direct_prompt",
+        observationKind: "plan_result",
+        details: {
+          candidateCount: planSearchMeta?.candidateCount ?? 0,
+          objective: planSearchMeta?.objective,
+          selectedCandidateId: planSearchMeta?.selectedCandidateId,
+          selectedWithinBudget: planSearchMeta?.selectedWithinBudget,
+        },
+      });
       const withPlanSearchMeta = (meta: EmbeddedPiRunMeta): EmbeddedPiRunMeta =>
         planSearchMeta ? { ...meta, planSearch: planSearchMeta } : meta;
 
@@ -783,6 +816,7 @@ export async function runEmbeddedPiAgent(
       const MAX_RUN_LOOP_ITERATIONS = resolveMaxRunRetryIterations(profileCandidates.length);
       let overflowCompactionAttempts = 0;
       let toolResultTruncationAttempted = false;
+      let nextReplanReason = "initial_prompt";
       let bootstrapPromptWarningSignaturesSeen =
         params.bootstrapPromptWarningSignaturesSeen ??
         (params.bootstrapPromptWarningSignature ? [params.bootstrapPromptWarningSignature] : []);
@@ -895,6 +929,8 @@ export async function runEmbeddedPiAgent(
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
             sessionKey: params.sessionKey,
+            attemptNumber: runLoopIterations,
+            replanReason: nextReplanReason,
             trigger: params.trigger,
             memoryFlushWritePath: params.memoryFlushWritePath,
             messageChannel: params.messageChannel,
@@ -1010,6 +1046,45 @@ export async function runEmbeddedPiAgent(
             lastAssistant?.stopReason === "error"
               ? lastAssistant.errorMessage?.trim() || formattedAssistantErrorText
               : undefined;
+          const observationFailureReason = promptError
+            ? describeUnknownError(promptError)
+            : assistantErrorText;
+          agentLoopTrace?.recordSpan({
+            stage: "observation",
+            attempt: runLoopIterations,
+            status: aborted
+              ? "aborted"
+              : observationFailureReason
+                ? "failed"
+                : timedOut && !timedOutDuringCompaction
+                  ? "failed"
+                  : "completed",
+            parentStepId: agentLoopTrace?.getLastReplanStepId(),
+            observationKind: promptError
+              ? "prompt_error"
+              : timedOut && !timedOutDuringCompaction
+                ? "timeout"
+                : attempt.clientToolCall
+                  ? "client_tool_call"
+                  : assistantErrorText
+                    ? "assistant_error"
+                    : "assistant_response",
+            usage: attemptUsage ?? undefined,
+            costUsd: estimateUsageCost({
+              usage: attemptUsage,
+              cost: model.cost,
+            }),
+            failureReason: observationFailureReason,
+            stopReason:
+              typeof lastAssistant?.stopReason === "string" ? lastAssistant.stopReason : undefined,
+            details: {
+              toolCount: attempt.toolMetas.length,
+              compactionCount: attemptCompactionCount,
+              timedOut,
+              timedOutDuringCompaction,
+              clientToolCallName: attempt.clientToolCall?.name,
+            },
+          });
 
           const contextOverflowError = !aborted
             ? (() => {
@@ -1053,6 +1128,7 @@ export async function runEmbeddedPiAgent(
               log.warn(
                 `context overflow persisted after in-attempt compaction (attempt ${overflowCompactionAttempts}/${MAX_OVERFLOW_COMPACTION_ATTEMPTS}); retrying prompt without additional compaction for ${provider}/${modelId}`,
               );
+              nextReplanReason = "context_overflow_retry";
               continue;
             }
             // Attempt explicit overflow compaction only when this attempt did not
@@ -1107,6 +1183,7 @@ export async function runEmbeddedPiAgent(
               if (compactResult.compacted) {
                 autoCompactionCount += 1;
                 log.info(`auto-compaction succeeded for ${provider}/${modelId}; retrying prompt`);
+                nextReplanReason = "compaction_retry";
                 continue;
               }
               log.warn(
@@ -1150,6 +1227,7 @@ export async function runEmbeddedPiAgent(
                   );
                   // Do NOT reset overflowCompactionAttempts here — the global cap must remain
                   // enforced across all iterations to prevent unbounded compaction cycles (OC-65).
+                  nextReplanReason = "tool_result_truncation_retry";
                   continue;
                 }
                 log.warn(
@@ -1206,6 +1284,7 @@ export async function runEmbeddedPiAgent(
             const errorText = describeUnknownError(promptError);
             if (await maybeRefreshCopilotForAuthError(errorText, copilotAuthRetry)) {
               authRetryPending = true;
+              nextReplanReason = "auth_refresh_retry";
               continue;
             }
             // Handle role ordering errors with a user-friendly message
@@ -1296,6 +1375,7 @@ export async function runEmbeddedPiAgent(
             ) {
               logPromptFailoverDecision("rotate_profile");
               await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
+              nextReplanReason = "profile_failover";
               continue;
             }
             const fallbackThinking = pickFallbackThinkingLevel({
@@ -1307,6 +1387,7 @@ export async function runEmbeddedPiAgent(
                 `unsupported thinking level for ${provider}/${modelId}; retrying with ${fallbackThinking}`,
               );
               thinkLevel = fallbackThinking;
+              nextReplanReason = "thinking_downgrade";
               continue;
             }
             // Throw FailoverError for prompt-side failover reasons when fallbacks
@@ -1339,6 +1420,7 @@ export async function runEmbeddedPiAgent(
               `unsupported thinking level for ${provider}/${modelId}; retrying with ${fallbackThinking}`,
             );
             thinkLevel = fallbackThinking;
+            nextReplanReason = "thinking_downgrade";
             continue;
           }
 
@@ -1375,6 +1457,7 @@ export async function runEmbeddedPiAgent(
             ))
           ) {
             authRetryPending = true;
+            nextReplanReason = "auth_refresh_retry";
             continue;
           }
           if (imageDimensionError && lastProfileId) {
@@ -1425,6 +1508,7 @@ export async function runEmbeddedPiAgent(
             if (rotated) {
               logAssistantFailoverDecision("rotate_profile");
               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
+              nextReplanReason = timedOut ? "timeout_retry" : "profile_failover";
               continue;
             }
 
@@ -1583,6 +1667,7 @@ export async function runEmbeddedPiAgent(
           };
         }
       } finally {
+        clearAgentLoopTrace(params.runId);
         await contextEngine.dispose?.();
         stopCopilotRefreshTimer();
         process.chdir(prevCwd);

@@ -17,6 +17,10 @@ type EmbeddedRunAttemptBase = Omit<
 export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   /** Pluggable context engine for ingest/assemble/compact lifecycle. */
   contextEngine?: ContextEngine;
+  /** Monotonic retry-loop attempt number for the parent embedded run. */
+  attemptNumber?: number;
+  /** Why this attempt is being run (initial prompt, retry, failover, etc.). */
+  replanReason?: string;
   /** Resolved model context window in tokens for assemble/compact budgeting. */
   contextTokenBudget?: number;
   /** Auth profile resolved for this attempt's provider/model call. */

@@ -37,6 +37,8 @@ export const FIELD_HELP: Record<string, string> = {
     "OpenTelemetry export settings for traces, metrics, and logs emitted by gateway components. Use this when integrating with centralized observability backends and distributed tracing pipelines.",
   "diagnostics.cacheTrace":
     "Cache-trace logging settings for observing cache decisions and payload context in embedded runs. Enable this temporarily for debugging and disable afterward to reduce sensitive log footprint.",
+  "diagnostics.agentLoopTrace":
+    "Agent-loop trace settings for durable plan, replan, tool, and observation span timelines in embedded runs. Enable this when debugging autonomy loops or collecting eval artifacts.",
   logging:
     "Logging behavior controls for severity, output destinations, formatting, and sensitive-data redaction. Keep levels and redaction strict enough for production while preserving useful diagnostics.",
   "logging.level":
@@ -544,6 +546,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Include full message payloads in trace output (default: true).",
   "diagnostics.cacheTrace.includePrompt": "Include prompt text in trace output (default: true).",
   "diagnostics.cacheTrace.includeSystem": "Include system prompt in trace output (default: true).",
+  "diagnostics.agentLoopTrace.enabled":
+    "Log structured agent-loop span traces for embedded agent runs (default: false).",
+  "diagnostics.agentLoopTrace.filePath":
+    "JSONL output path for agent-loop span traces (default: $OPENCLAW_STATE_DIR/logs/agent-loop-trace.jsonl).",
   "tools.exec.applyPatch.enabled":
     "Experimental. Enables apply_patch for OpenAI models when allowed by tool policy.",
   "tools.exec.applyPatch.workspaceOnly":

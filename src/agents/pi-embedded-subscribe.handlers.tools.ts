@@ -6,6 +6,7 @@ import {
 } from "../infra/exec-approval-reply.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import type { PluginHookAfterToolCallEvent } from "../plugins/types.js";
+import { getAgentLoopTrace } from "./agent-loop-trace.js";
 import { normalizeTextForComparison } from "./pi-embedded-helpers.js";
 import { isMessagingTool, isMessagingToolSendAction } from "./pi-embedded-messaging.js";
 import type {
@@ -29,6 +30,7 @@ import { normalizeToolName } from "./tool-policy.js";
 type ToolStartRecord = {
   startTime: number;
   args: unknown;
+  traceStepId?: string;
 };
 
 /** Track tool execution start data for after_tool_call hook. */
@@ -312,7 +314,20 @@ export async function handleToolExecutionStart(
   const runId = ctx.params.runId;
 
   // Track start time and args for after_tool_call hook
-  toolStartData.set(buildToolStartKey(runId, toolCallId), { startTime: Date.now(), args });
+  const traceStepId = getAgentLoopTrace(runId)?.startSpan({
+    stage: "tool",
+    attempt: undefined,
+    toolName,
+    toolCallId,
+    details: {
+      meta: extendExecMeta(toolName, args, inferToolMetaFromArgs(toolName, args)),
+    },
+  });
+  toolStartData.set(buildToolStartKey(runId, toolCallId), {
+    startTime: Date.now(),
+    args,
+    traceStepId,
+  });
 
   if (toolName === "read") {
     const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -438,6 +453,7 @@ export async function handleToolExecutionEnd(
   const toolStartKey = buildToolStartKey(runId, toolCallId);
   const startData = toolStartData.get(toolStartKey);
   toolStartData.delete(toolStartKey);
+  const trace = getAgentLoopTrace(runId);
   const callSummary = ctx.state.toolMetaById.get(toolCallId);
   const meta = callSummary?.meta;
   ctx.state.toolMetas.push({ toolName, meta });
@@ -517,6 +533,28 @@ export async function handleToolExecutionEnd(
   if (!isToolError && toolName === "cron" && isCronAddAction(startData?.args)) {
     ctx.state.successfulCronAdds += 1;
   }
+
+  trace?.finishSpan(startData?.traceStepId ?? "", {
+    status: isToolError ? "failed" : "completed",
+    toolName,
+    toolCallId,
+    failureReason: isToolError ? extractToolErrorMessage(sanitizedResult) : undefined,
+    details: meta ? { meta } : undefined,
+  });
+  trace?.recordSpan({
+    stage: "observation",
+    attempt: undefined,
+    parentStepId: startData?.traceStepId,
+    observationKind: "tool_result",
+    status: isToolError ? "failed" : "completed",
+    toolName,
+    toolCallId,
+    failureReason: isToolError ? extractToolErrorMessage(sanitizedResult) : undefined,
+    details: {
+      meta,
+      hasMedia: pendingMediaUrls.length > 0,
+    },
+  });
 
   emitAgentEvent({
     runId: ctx.params.runId,
