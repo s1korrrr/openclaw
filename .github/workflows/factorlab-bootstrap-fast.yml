@@ -1,0 +1,99 @@
+name: FactorLab Fast Bootstrap Export
+
+on:
+  push:
+    branches:
+      - factorlab/bootstrap-rust-1.97.1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/factorlab-bootstrap-fast.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Install exact toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+          rustup run 1.97.1 rustc --version --verbose
+
+      - name: Resolve and vendor current FactorLab dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/factorlab-bootstrap"
+          mkdir -p "$root/src"
+          cat > "$root/Cargo.toml" <<'TOML'
+          [package]
+          name = "factorlab-dependency-bootstrap"
+          version = "0.0.0"
+          edition = "2024"
+          rust-version = "1.97.1"
+          publish = false
+
+          [dependencies]
+          arrow = { version = "59.1.0", default-features = false, features = ["ipc"] }
+          parquet = { version = "59.1.0", default-features = false, features = ["arrow", "zstd"] }
+          datafusion = { version = "54.1.0", default-features = false, features = ["parquet"] }
+          async-trait = "0.1.89"
+          bytes = "1.11"
+          clap = { version = "4.5", features = ["derive", "env"] }
+          fs2 = "0.4"
+          futures = "0.3"
+          hex = "0.4"
+          loom = "0.7"
+          prost = "0.14.1"
+          prost-build = "0.14.1"
+          proptest = "1"
+          rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "1"
+          sha2 = "0.10"
+          tempfile = "3"
+          thiserror = "2"
+          time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+          tokio = { version = "1.52", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "test-util", "time"] }
+          tokio-util = "0.7"
+          toml = "0.8"
+          tracing = "0.1"
+          uuid = { version = "1", features = ["serde", "v7"] }
+
+          [dev-dependencies]
+          assert_cmd = "2"
+          predicates = "3"
+          TOML
+          printf 'fn main() {}\n' > "$root/src/main.rs"
+          cd "$root"
+          rustup run 1.97.1 cargo generate-lockfile
+          rustup run 1.97.1 cargo vendor --locked vendor > cargo-config.toml
+          rustup run 1.97.1 cargo check --locked --offline
+
+      - name: Package compiler and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_root="$RUNNER_TEMP/factorlab-export"
+          mkdir -p "$export_root"
+          rustc_path="$(rustup which --toolchain 1.97.1 rustc)"
+          toolchain_dir="${rustc_path%/bin/rustc}"
+          tar -C "$(dirname "$toolchain_dir")" -czf "$export_root/rust-toolchain-1.97.1.tar.gz" "$(basename "$toolchain_dir")"
+          tar -C "$RUNNER_TEMP/factorlab-bootstrap" -czf "$export_root/factorlab-vendor.tar.gz" Cargo.lock cargo-config.toml vendor
+          cd "$export_root"
+          sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Upload fast bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: factorlab-fast-bootstrap-rust-1.97.1
+          path: ${{ runner.temp }}/factorlab-export
+          if-no-files-found: error
+          retention-days: 1
