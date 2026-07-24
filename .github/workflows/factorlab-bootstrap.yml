@@ -32,7 +32,7 @@ jobs:
           rustup run 1.97.1 rustfmt --version
           rustup run 1.97.1 cargo clippy --version
 
-      - name: Resolve and vendor FactorLab dependencies
+      - name: Resolve and vendor complete FactorLab dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -74,6 +74,14 @@ jobs:
           toml = "0.8"
           tracing = "0.1"
           uuid = { version = "1", features = ["serde", "v7"] }
+          faer = "0.24.4"
+          clarabel = "0.11.1"
+          rand_chacha = "0.10.0"
+          rand_core = "0.10.0"
+          ed25519-dalek = "3.0.0"
+          tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+          semver = { version = "1.0.28", features = ["serde"] }
+          libc = "0.2"
 
           [dev-dependencies]
           assert_cmd = "2"
@@ -107,7 +115,7 @@ jobs:
             "$export_root/rust-toolchain-1.97.1-x86_64-unknown-linux-gnu.tar.gz" \
             "$(basename "$toolchain_dir")"
           tar -C "$RUNNER_TEMP/factorlab-bootstrap" -czf \
-            "$export_root/factorlab-vendor-all-features.tar.gz" \
+            "$export_root/factorlab-vendor-complete.tar.gz" \
             Cargo.lock cargo-config.toml vendor
           tar -C "$RUNNER_TEMP/factorlab-tools" -czf \
             "$export_root/factorlab-cargo-tools-x86_64-unknown-linux-gnu.tar.gz" \
